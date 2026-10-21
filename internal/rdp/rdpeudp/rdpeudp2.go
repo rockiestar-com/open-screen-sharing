@@ -204,6 +204,8 @@ func (c *Conn) receiveLowerBound(wire uint16) {
 		return
 	}
 	if seq > c.receiveHighest {
+		c.sequencedPackets += seq - 1 - c.receiveHighest
+		c.missedPackets += seq - 1 - c.receiveHighest
 		c.receiveState = c.receiveState[:0]
 		c.receiveHighest = seq - 1
 	} else {
@@ -234,6 +236,8 @@ func (c *Conn) receiveDataPayload(wireSeq uint16, wireChannelSeq uint16, payload
 		c.ackNow = true
 	}
 	if seq > c.receiveHighest {
+		c.sequencedPackets += seq - c.receiveHighest
+		c.missedPackets += seq - c.receiveHighest - 1
 		c.receiveHighest = seq
 		c.highestArrival = now
 	}

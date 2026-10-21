@@ -188,7 +188,11 @@ func (c *Conn) receiveData(sourceStart uint32, payload []byte, now time.Time) {
 	if seq != c.receiveHighest+1 {
 		c.ackNow = true
 	}
-	c.receiveHighest = max(c.receiveHighest, seq)
+	if seq > c.receiveHighest {
+		c.sequencedPackets += seq - c.receiveHighest
+		c.missedPackets += seq - c.receiveHighest - 1
+		c.receiveHighest = seq
+	}
 	if c.unacknowledged == 0 {
 		c.ackSince = now
 		c.ackAt = now.Add(c.ackDelay())

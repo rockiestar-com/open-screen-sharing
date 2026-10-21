@@ -13,10 +13,11 @@ type Statistics struct {
 
 	HighPerformance bool
 
-	VideoPackets         int64
-	VideoPacketsExpected int64
+	UDP             bool
+	Packets         int64
+	PacketsExpected int64
 
-	KeyframeRequests int64
+	VideoLosses int64
 
 	QueueDelayMilliseconds float64
 }
@@ -47,9 +48,10 @@ func (r rfbRemote) statistics(statistics *Statistics) {
 	streamStatistics := stream.Stats()
 	statistics.ReceivedBytes += int64(streamStatistics.VideoBytes + streamStatistics.AudioBytes)
 	statistics.HighPerformance = true
-	statistics.VideoPackets = int64(streamStatistics.VideoPackets)
-	statistics.VideoPacketsExpected = int64(streamStatistics.VideoPacketsExpected)
-	statistics.KeyframeRequests = int64(streamStatistics.KeyframeRequests)
+	statistics.UDP = true
+	statistics.Packets = int64(streamStatistics.VideoPackets)
+	statistics.PacketsExpected = int64(streamStatistics.VideoPacketsExpected)
+	statistics.VideoLosses = int64(streamStatistics.VideoLosses)
 	statistics.QueueDelayMilliseconds = float64(streamStatistics.OneWayDelay.Microseconds()) / 1000
 }
 

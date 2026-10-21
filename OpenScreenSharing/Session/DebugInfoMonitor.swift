@@ -9,50 +9,76 @@ final class DebugInfoMonitor {
         var readyPerSecond: Double?
         var shownPerSecond: Double?
         var bitsPerSecond: Double?
-        var roundTripMilliseconds: Double?
         var encoding: String?
-        var toScreenMilliseconds: Double?
-        var holdMilliseconds: Double?
-        var decodeMilliseconds: Double?
-        var video: Video?
+        var networkMilliseconds: Double
+        var deviceMilliseconds: Double?
+        var lossy: Bool
+        var loss: Double?
     }
 
-    struct Video: Equatable {
-        var loss: Double?
-        var keyframeRequests: Int64
-        var queuingDelayMilliseconds: Double
+    struct Response: Equatable {
+        var total: TimeInterval
+        var network: TimeInterval
+        var device: TimeInterval
+
+        var remote: TimeInterval { max(total - network - device, 0) }
+    }
+
+    struct Span: Equatable {
+        var lateness: TimeInterval?
+        var stutters = 0
+        var seconds = 0
     }
 
     private struct Ready {
         var picture: Int
         var arrival: CFTimeInterval
-        var hold: TimeInterval
-        var decode: TimeInterval
+        var capture: CFTimeInterval?
     }
 
-    private struct Screened {
-        var toScreen: TimeInterval
-        var hold: TimeInterval
-        var decode: TimeInterval
+    private struct Shown {
+        var capture: CFTimeInterval
+        var presentation: CFTimeInterval
     }
 
-    static let graphLength = 120
+    private struct Input {
+        var sentAt: CFTimeInterval
+        var picture: Int?
+        var arrival: CFTimeInterval = 0
+    }
+
+    static let stutter = 0.05
+    static let spans = 60
+    static let spanSeconds = 5
     private static let maxWaiting = 64
+    private static let idle = 0.2
+    private static let responseTimeout = 1.0
+    private static let responseSamples = 5
 
     private(set) var figures: Figures?
-    private(set) var toScreen: [Double] = []
+    private(set) var timeline: [Span] = []
+    private(set) var response: Response?
+
+    var stutters: Int { timeline.reduce(0) { $0 + $1.stutters } }
 
     nonisolated let isRunning = ManagedAtomic<Bool>(false)
     @PerceptionIgnored private var run = 0
     @PerceptionIgnored private var startedAt: CFTimeInterval = 0
     @PerceptionIgnored private var lastPicture: Int?
     @PerceptionIgnored private var lastPresentation: CFTimeInterval?
+    @PerceptionIgnored private var lastShown: Shown?
     @PerceptionIgnored private var waiting: [Ready] = []
     @PerceptionIgnored private var ready = 0
     @PerceptionIgnored private var shown = 0
-    @PerceptionIgnored private var screened: [Screened] = []
+    @PerceptionIgnored private var delays: [TimeInterval] = []
+    @PerceptionIgnored private var lateness: TimeInterval?
+    @PerceptionIgnored private var hitches = 0
+    @PerceptionIgnored private var deviceMilliseconds: Double?
     @PerceptionIgnored private var windowStart: CFTimeInterval = 0
     @PerceptionIgnored private var previous: SessionStatistics?
+    @PerceptionIgnored private var input: Input?
+    @PerceptionIgnored private var lastArrival: CFTimeInterval = 0
+    @PerceptionIgnored private var responses: [Response] = []
 
     var presentationRun: Int? { isRunning.load(ordering: .relaxed) ? run : nil }
 
@@ -61,15 +87,23 @@ final class DebugInfoMonitor {
         run &+= 1
         startedAt = CACurrentMediaTime()
         windowStart = startedAt
-        toScreen = []
         figures = nil
+        timeline = []
         lastPicture = nil
         lastPresentation = nil
+        lastShown = nil
         waiting = []
         ready = 0
         shown = 0
-        screened = []
+        delays = []
+        lateness = nil
+        hitches = 0
+        deviceMilliseconds = nil
         previous = nil
+        input = nil
+        lastArrival = 0
+        responses = []
+        response = nil
     }
 
     func stop() {
@@ -78,14 +112,27 @@ final class DebugInfoMonitor {
         waiting = []
     }
 
-    func pictureReady(_ picture: Int, arrival: CFTimeInterval, hold: TimeInterval, decode: TimeInterval) {
+    func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?) {
         guard isRunning.load(ordering: .relaxed) else { return }
         if let lastPicture, picture <= lastPicture { return }
         ready += 1
         if waiting.count == Self.maxWaiting {
             waiting.removeFirst()
         }
-        waiting.append(Ready(picture: picture, arrival: arrival, hold: hold, decode: decode))
+        waiting.append(Ready(picture: picture, arrival: arrival, capture: capture))
+        if let input, input.picture == nil {
+            self.input =
+                arrival > input.sentAt && arrival - input.sentAt < Self.responseTimeout
+                ? Input(sentAt: input.sentAt, picture: picture, arrival: arrival) : nil
+        }
+        lastArrival = max(lastArrival, arrival)
+    }
+
+    func inputSent() {
+        guard isRunning.load(ordering: .relaxed) else { return }
+        let now = CACurrentMediaTime()
+        if let input, now - input.sentAt < Self.responseTimeout { return }
+        input = now - lastArrival >= Self.idle ? Input(sentAt: now) : nil
     }
 
     func picturePresented(_ picture: Int, at time: CFTimeInterval, run: Int) {
@@ -95,20 +142,43 @@ final class DebugInfoMonitor {
         lastPicture = picture
         lastPresentation = time
         shown += 1
+        if let input, let responsePicture = input.picture, picture >= responsePicture {
+            self.input = nil
+            if let network = figures?.networkMilliseconds {
+                responses.append(Response(total: time - input.sentAt, network: network / 1000, device: max(time - input.arrival, 0)))
+                if responses.count > Self.responseSamples {
+                    responses.removeFirst()
+                }
+                response = responses.sorted { $0.total < $1.total }[responses.count / 2]
+            }
+        }
         var kept: [Ready] = []
-        var took: [Double] = []
+        var newest: Ready?
+        var late: TimeInterval = 0
         for waited in waiting {
             guard waited.picture <= picture else {
                 kept.append(waited)
                 continue
             }
             let delay = max(time - waited.arrival, 0)
-            screened.append(Screened(toScreen: delay, hold: waited.hold, decode: waited.decode))
-            took.append(delay)
+            delays.append(delay)
+            late = max(late, delay)
+            newest = waited
         }
         waiting = kept
-        guard !took.isEmpty else { return }
-        toScreen = Array((toScreen + took).suffix(Self.graphLength))
+        guard let newest else { return }
+        if let capture = newest.capture {
+            let last = lastShown
+            lastShown = Shown(capture: capture, presentation: time)
+            guard let last, capture >= last.capture else { return }
+            late = max(time - last.presentation - (capture - last.capture), 0)
+        } else {
+            lastShown = nil
+        }
+        lateness = max(lateness ?? 0, late)
+        if late > Self.stutter {
+            hitches += 1
+        }
     }
 
     func sample(_ statistics: SessionStatistics?) {
@@ -118,7 +188,9 @@ final class DebugInfoMonitor {
             windowStart = now
             ready = 0
             shown = 0
-            screened.removeAll(keepingCapacity: true)
+            delays.removeAll(keepingCapacity: true)
+            lateness = nil
+            hitches = 0
         }
         guard let statistics else {
             figures = nil
@@ -126,38 +198,52 @@ final class DebugInfoMonitor {
         }
         let elapsed = now - windowStart
         let measured = previous != nil && elapsed > 0
-        func rate(_ count: Int64, since earlier: Int64?) -> Double? {
-            guard measured else { return nil }
-            let added = earlier.map { count >= $0 ? count - $0 : count } ?? count
-            return Double(added) / elapsed
+        var bitsPerSecond: Double?
+        if measured, let earlier = previous?.receivedBytes {
+            let added = statistics.receivedBytes >= earlier ? statistics.receivedBytes - earlier : statistics.receivedBytes
+            bitsPerSecond = Double(added) * 8 / elapsed
         }
-        func milliseconds(_ values: [TimeInterval]) -> Double? {
-            values.isEmpty ? nil : values.reduce(0, +) / Double(values.count) * 1000
-        }
-        var video: Video?
-        if let stream = statistics.video {
-            var expected = stream.expectedPackets
-            var packets = stream.packets
-            if let earlier = previous?.video, expected >= earlier.expectedPackets, packets >= earlier.packets {
-                expected -= earlier.expectedPackets
-                packets -= earlier.packets
+        var loss: Double?
+        if let packets = statistics.packets {
+            var expected = packets.expected
+            var received = packets.received
+            if let earlier = previous?.packets, expected >= earlier.expected, received >= earlier.received {
+                expected -= earlier.expected
+                received -= earlier.received
             }
-            video = Video(
-                loss: expected > 0 ? Double(max(expected - packets, 0)) / Double(expected) : nil,
-                keyframeRequests: stream.keyframeRequests,
-                queuingDelayMilliseconds: stream.queuingDelayMilliseconds
-            )
+            loss = expected > 0 ? Double(max(expected - received, 0)) / Double(expected) : nil
+        }
+        var losses = 0
+        if let stream = statistics.video, let earlier = previous?.video, stream.losses > earlier.losses {
+            losses = Int(stream.losses - earlier.losses)
+        }
+        if !delays.isEmpty {
+            deviceMilliseconds = delays.reduce(0, +) / Double(delays.count) * 1000
         }
         figures = Figures(
             readyPerSecond: measured ? Double(ready) / elapsed : nil,
             shownPerSecond: measured ? Double(shown) / elapsed : nil,
-            bitsPerSecond: rate(statistics.receivedBytes, since: previous?.receivedBytes).map { $0 * 8 },
-            roundTripMilliseconds: statistics.roundTripMilliseconds,
+            bitsPerSecond: bitsPerSecond,
             encoding: statistics.encoding,
-            toScreenMilliseconds: milliseconds(screened.map(\.toScreen)),
-            holdMilliseconds: video == nil ? nil : milliseconds(screened.map(\.hold)),
-            decodeMilliseconds: video == nil ? nil : milliseconds(screened.map(\.decode)),
-            video: video
+            networkMilliseconds: statistics.roundTripMilliseconds + (statistics.video?.queuingDelayMilliseconds ?? 0),
+            deviceMilliseconds: deviceMilliseconds,
+            lossy: statistics.packets != nil,
+            loss: loss
         )
+        guard measured else { return }
+        var timeline = self.timeline
+        if timeline.last.map({ $0.seconds >= Self.spanSeconds }) ?? true {
+            if timeline.count == Self.spans {
+                timeline.removeFirst()
+            }
+            timeline.append(Span())
+        }
+        let index = timeline.count - 1
+        timeline[index].seconds += 1
+        timeline[index].stutters += max(hitches, losses)
+        if let lateness {
+            timeline[index].lateness = max(timeline[index].lateness ?? 0, lateness)
+        }
+        self.timeline = timeline
     }
 }

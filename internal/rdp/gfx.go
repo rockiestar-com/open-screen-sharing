@@ -5,6 +5,7 @@ import (
 	"image"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/nekohasekai/open-screen-sharing/internal/bgra"
 	"github.com/nekohasekai/open-screen-sharing/internal/rdp/codec/clear"
@@ -171,6 +172,7 @@ func gfxPacket(command uint16, body []byte) []byte {
 }
 
 func (p *rdpgfx) OnData(data []byte) error {
+	p.g.received = time.Now()
 	data, err := p.zgfx.Decompress(data)
 	if err != nil {
 		return E.Cause(err, "rdpgfx: decompress channel data")

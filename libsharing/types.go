@@ -280,6 +280,14 @@ func newDisplayList(layout *rfb.DisplayLayout) *DisplayList {
 	return list
 }
 
+type FramebufferUpdate struct {
+	X               int32
+	Y               int32
+	Width           int32
+	Height          int32
+	HoldNanoseconds int64
+}
+
 type CursorImage struct {
 	Width    int32
 	Height   int32

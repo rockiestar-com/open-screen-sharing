@@ -46,8 +46,7 @@ nonisolated final class DisplayPipeline: @unchecked Sendable {
     private struct Scheduled {
         var frame: DecodedVideoFrame
         var due: CFTimeInterval
-        var arrivedAt: CFTimeInterval
-        var ready: @Sendable (_ picture: Int, _ held: TimeInterval) -> Void
+        var ready: @Sendable (_ picture: Int) -> Void
     }
 
     private struct Copy {
@@ -207,7 +206,7 @@ nonisolated final class DisplayPipeline: @unchecked Sendable {
         lock.unlock()
     }
 
-    func setVideoFrame(_ frame: DecodedVideoFrame, ready: @escaping @Sendable (_ picture: Int, _ held: TimeInterval) -> Void) {
+    func setVideoFrame(_ frame: DecodedVideoFrame, ready: @escaping @Sendable (_ picture: Int) -> Void) {
         let now = CACurrentMediaTime()
         lock.lock()
         guard isVideo else {
@@ -215,7 +214,7 @@ nonisolated final class DisplayPipeline: @unchecked Sendable {
             return
         }
         let due = schedulesPresentation ? presentationDue(capture: frame.timing.capture, at: now) : now
-        scheduled.append(Scheduled(frame: frame, due: due, arrivedAt: now, ready: ready))
+        scheduled.append(Scheduled(frame: frame, due: due, ready: ready))
         let handler = wakeHandler
         let horizon = max(now, consumedThrough)
         lock.unlock()
@@ -279,9 +278,8 @@ nonisolated final class DisplayPipeline: @unchecked Sendable {
             canvasHeight = frame.canvasHeight
             videoTurns = frame.turns
         }
-        let now = CACurrentMediaTime()
         for (item, picture) in promoted {
-            item.ready(picture, now - item.arrivedAt)
+            item.ready(picture)
         }
         return !promoted.isEmpty
     }

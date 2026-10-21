@@ -37,17 +37,13 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
     private struct Submission {
         var frameID: Int64
         var band: Int
-        var received: CFTimeInterval
     }
 
     private struct PendingFrame {
         var id: Int64
-        var startedAt: CFTimeInterval
         var arrival: CFTimeInterval
-        var hold: TimeInterval
         var capture: CFTimeInterval
         var turns: PictureTurns
-        var completedAt: CFTimeInterval?
         var submittedMask = 0
         var ended = false
         var remaining = 0
@@ -176,7 +172,6 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
             recover()
             return
         }
-        let received = CACurrentMediaTime()
         if lastSubmittedFrameID != unit.frameID {
             if let previous = lastSubmittedFrameID {
                 guard lastSubmissionEnded, previous < Int64.max, unit.frameID == previous + 1 else {
@@ -189,7 +184,7 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
                 return
             }
             pending.append(PendingFrame(
-                id: unit.frameID, startedAt: received, arrival: unit.arrival, hold: unit.libraryHold, capture: unit.presentationTime.seconds,
+                id: unit.frameID, arrival: unit.arrival, capture: unit.presentationTime.seconds,
                 turns: unit.turns,
                 latestTickets: Array(repeating: nil, count: bands), strips: Array(repeating: nil, count: bands)))
             lastSubmittedFrameID = unit.frameID
@@ -201,7 +196,6 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
         }
         pending[index].submittedMask |= 1 << unit.band
         pending[index].arrival = max(pending[index].arrival, unit.arrival)
-        pending[index].hold = max(pending[index].hold, unit.libraryHold)
         guard unit.changedBands == pending[index].submittedMask else {
             recover()
             return
@@ -212,7 +206,7 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
         pending[index].latestTickets[unit.band] = ticket
         pending[index].ended = unit.frameEnd
         lastSubmissionEnded = unit.frameEnd
-        inFlight[ticket] = Submission(frameID: unit.frameID, band: unit.band, received: received)
+        inFlight[ticket] = Submission(frameID: unit.frameID, band: unit.band)
         if waitingForSync {
             waitingForSync = false
             base = Array(repeating: nil, count: bands)
@@ -246,7 +240,6 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
             }
             rejections = 0
             pending[index].remaining -= 1
-            pending[index].completedAt = CACurrentMediaTime()
             if pending[index].latestTickets[submission.band] == completion.ticket {
                 pending[index].strips[submission.band] = pixelBuffer
             }
@@ -279,9 +272,7 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
                     strips: bands == 1 ? [] : strips,
                     canvasHeight: canvasHeight,
                     turns: first.turns,
-                    timing: FrameTiming(
-                        arrival: first.arrival, libraryHold: first.hold,
-                        decode: max((first.completedAt ?? CACurrentMediaTime()) - first.startedAt, 0), capture: first.capture))
+                    timing: FrameTiming(arrival: first.arrival, capture: first.capture))
                 output(frame)
             }
         }

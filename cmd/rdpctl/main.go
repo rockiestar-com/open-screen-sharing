@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"image"
 	"log/slog"
 	"math"
 	"net"
@@ -379,7 +378,7 @@ func (h *handler) ResizeFramebuffer(width, height int) (*bgra.Image, error) {
 	return bgra.New(width, height), nil
 }
 
-func (h *handler) FramebufferUpdated(r image.Rectangle) {
+func (h *handler) FramebufferUpdated(update rdp.Update) {
 	h.access.Lock()
 	defer h.access.Unlock()
 	if h.updates == 0 {
@@ -387,7 +386,7 @@ func (h *handler) FramebufferUpdated(r image.Rectangle) {
 		h.emit(map[string]any{"event": "first-frame", "milliseconds": h.first.Seconds() * 1000})
 	}
 	h.updates++
-	h.pixels += uint64(r.Dx() * r.Dy())
+	h.pixels += uint64(update.Rectangle.Dx() * update.Rectangle.Dy())
 }
 
 func (h *handler) InfoChanged(info rdp.Info) {

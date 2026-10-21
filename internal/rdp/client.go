@@ -492,6 +492,7 @@ func (c *Client) Statistics() Statistics {
 		if statistics.RoundTrip == 0 {
 			statistics.RoundTrip = t.udp.RoundTrip()
 		}
+		statistics.PacketsExpected, statistics.PacketsMissed = t.udp.Packets()
 	}
 	return statistics
 }

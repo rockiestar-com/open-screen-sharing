@@ -9,12 +9,31 @@ struct DebugInfoView: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    static let pictureInterval = 1.0 / 60
-    static let hitch = 0.05
-    private static let slow = pictureInterval * 2
     private static let columns = 27
-    private static let lossWarning = 0.01
     private static let dropWarning = 1.0
+    private static let responseWarning = 100.0
+    private static let responseSevere = 200.0
+    private static let remoteWarning = 50.0
+    private static let remoteSevere = 100.0
+    private static let networkWarning = 50.0
+    private static let networkSevere = 100.0
+    private static let deviceWarning = 2000.0 / 60
+    private static let deviceSevere = DebugInfoMonitor.stutter * 1000
+    private static let lossWarning = 0.01
+    private static let lossSevere = 0.05
+    private static let stutterSevere = 10.0
+
+    private static let deviceName: String = {
+        #if os(iOS)
+        switch UIDevice.current.userInterfaceIdiom {
+        case .pad: "This iPad"
+        case .phone: "This iPhone"
+        default: "This Device"
+        }
+        #else
+        "This Mac"
+        #endif
+    }()
 
     private var fontSize: CGFloat { horizontalSizeClass == .compact ? 11 : 12 }
 
@@ -29,47 +48,50 @@ struct DebugInfoView: View {
 
     var body: some View {
         WithPerceptionTracking {
-            let figures = controller.debugInfo.figures
-            let video = figures?.video
+            let monitor = controller.debugInfo
+            let figures = monitor.figures
+            let response = monitor.response
+            let network = response.map { $0.network * 1000 } ?? figures?.networkMilliseconds
+            let device = response.map { $0.device * 1000 } ?? figures?.deviceMilliseconds
+            let stutters = monitor.stutters
+            let dialect = controller.info.dialect
             let isVideo = controller.isVideo
             VStack(spacing: 0) {
                 pair {
-                    Text(verbatim: controller.info.dialect == .rdp ? "RDP" : isVideo ? "Apple VNC" : "VNC")
-                        .foregroundStyle(controller.info.dialect != .apple ? Color.white : isVideo ? .green : .orange)
-                } trailing: {
-                    Text(verbatim: (isVideo ? controller.info.videoCodec : figures?.encoding) ?? "—")
-                }
-                pair {
-                    Text(verbatim: imageSize)
+                    Text(verbatim: dialect == .rdp ? "RDP" : isVideo ? "High Performance" : dialect == .apple ? "Standard" : "VNC")
+                        .foregroundStyle(dialect != .apple ? Color.white : isVideo ? .green : .orange)
                 } trailing: {
                     Text(verbatim: figures?.shownPerSecond.map { String(format: "%.0f fps", $0) } ?? "—")
                         .foregroundStyle(dropsFrames(figures) ? Color.orange : .white)
                 }
+                pair {
+                    Text(verbatim: (isVideo ? controller.info.videoCodec : figures?.encoding) ?? "—")
+                } trailing: {
+                    Text(verbatim: imageSize)
+                }
                 VStack(spacing: 0) {
-                    row("Bitrate", figures?.bitsPerSecond.map(Self.bitrate))
-                    if isVideo {
-                        row(
-                            "Loss / Keyframes", video?.loss.map { String(format: "%.1f%%", $0 * 100) },
-                            video.map { "\($0.keyframeRequests)" },
-                            firstColor: (video?.loss ?? 0) > Self.lossWarning ? .red : .white)
-                        row(
-                            "RTT / Queue", figures?.roundTripMilliseconds.map(Self.wholeMilliseconds),
-                            video.map { Self.wholeMilliseconds($0.queuingDelayMilliseconds) + "ms" })
-                    } else {
-                        row("RTT", figures?.roundTripMilliseconds.map { Self.wholeMilliseconds($0) + "ms" })
-                    }
                     row(
-                        "To Screen", figures?.toScreenMilliseconds.map(Self.milliseconds),
-                        color: (figures?.toScreenMilliseconds ?? 0) > Self.slow * 1000 ? .orange : .white)
-                    if isVideo {
+                        "Response", response.map { Self.milliseconds($0.total * 1000) },
+                        color: Self.color(response.map { $0.total * 1000 }, warning: Self.responseWarning, severe: Self.responseSevere))
+                    row(
+                        "  Network", network.map(Self.milliseconds),
+                        color: Self.color(network, warning: Self.networkWarning, severe: Self.networkSevere))
+                    row(
+                        "  " + remoteName, response.map { Self.milliseconds($0.remote * 1000) },
+                        color: Self.color(response.map { $0.remote * 1000 }, warning: Self.remoteWarning, severe: Self.remoteSevere))
+                    row(
+                        "  " + Self.deviceName, device.map(Self.milliseconds),
+                        color: Self.color(device, warning: Self.deviceWarning, severe: Self.deviceSevere))
+                    row("Bitrate", figures?.bitsPerSecond.map(Self.bitrate))
+                    if figures?.lossy == true {
                         row(
-                            "Buffer / Decode", figures?.holdMilliseconds.map(Self.wholeMilliseconds),
-                            figures?.decodeMilliseconds.map { Self.wholeMilliseconds($0) + "ms" },
-                            secondColor: (figures?.decodeMilliseconds ?? 0) > Self.pictureInterval * 1000 ? .orange : .white)
+                            "Packet Loss", figures?.loss.map { String(format: "%.1f%%", $0 * 100) },
+                            color: Self.color(figures?.loss, warning: Self.lossWarning, severe: Self.lossSevere))
                     }
+                    row("Stutters", "\(stutters)", color: Self.color(Double(stutters), warning: 1, severe: Self.stutterSevere))
                 }
                 .padding(.top, 4)
-                ToScreenGraph(monitor: controller.debugInfo)
+                StutterTimeline(monitor: monitor)
                     .frame(height: fontSize * 3)
                     .padding(.top, 2)
                     .accessibilityHidden(true)
@@ -93,6 +115,14 @@ struct DebugInfoView: View {
                 }
                 monitor.stop()
             }
+        }
+    }
+
+    private var remoteName: String {
+        switch controller.platform {
+        case .mac: "Mac"
+        case .pc: "PC"
+        case .iOS: "Remote"
         }
     }
 
@@ -127,18 +157,9 @@ struct DebugInfoView: View {
         }
     }
 
-    private func row(
-        _ label: String, _ first: String?, _ second: String?, firstColor: Color = .white, secondColor: Color = .white
-    ) -> some View {
-        pair {
-            Text(verbatim: label)
-        } trailing: {
-            Text(verbatim: first ?? "—")
-                .foregroundStyle(firstColor)
-            Text(verbatim: " / ")
-            Text(verbatim: second ?? "—")
-                .foregroundStyle(secondColor)
-        }
+    private static func color(_ value: Double?, warning: Double, severe: Double) -> Color {
+        guard let value else { return .white }
+        return value >= severe ? .red : value >= warning ? .orange : .white
     }
 
     private static func bitrate(_ bitsPerSecond: Double) -> String {
@@ -146,36 +167,32 @@ struct DebugInfoView: View {
     }
 
     private static func milliseconds(_ value: Double) -> String {
-        value < 1000 ? String(format: "%.1fms", value) : String(format: "%.1fs", value / 1000)
-    }
-
-    private static func wholeMilliseconds(_ value: Double) -> String {
-        value < 1 ? "<1" : String(format: "%.0f", value)
+        value < 1 ? "<1ms" : String(format: "%.0fms", value)
     }
 }
 
-private struct ToScreenGraph: View {
+private struct StutterTimeline: View {
     let monitor: DebugInfoMonitor
 
     @Environment(\.displayScale) private var displayScale
 
-    private static let top = DebugInfoView.pictureInterval * 4
-    private static let gridColumns = 6
+    private static let top = DebugInfoMonitor.stutter * 4
+    private static let minutes = DebugInfoMonitor.spans * DebugInfoMonitor.spanSeconds / 60
 
     var body: some View {
         WithPerceptionTracking {
-            let values = monitor.toScreen
+            let spans = monitor.timeline
             Canvas { context, size in
                 let pixel = 1 / displayScale
                 var grid = Path()
-                for column in 1..<Self.gridColumns {
-                    let x = size.width * CGFloat(column) / CGFloat(Self.gridColumns)
+                for minute in 1..<Self.minutes {
+                    let x = size.width * CGFloat(minute) / CGFloat(Self.minutes)
                     grid.move(to: CGPoint(x: x, y: 0))
                     grid.addLine(to: CGPoint(x: x, y: size.height))
                 }
-                let frameLine = (size.height - 1) * (1 - CGFloat(DebugInfoView.pictureInterval / Self.top))
-                grid.move(to: CGPoint(x: 0, y: frameLine))
-                grid.addLine(to: CGPoint(x: size.width, y: frameLine))
+                let stutterLine = (size.height - 1) * (1 - CGFloat(DebugInfoMonitor.stutter / Self.top))
+                grid.move(to: CGPoint(x: 0, y: stutterLine))
+                grid.addLine(to: CGPoint(x: size.width, y: stutterLine))
                 context.stroke(grid, with: .color(.white.opacity(0.3)), lineWidth: pixel)
                 var axes = Path()
                 axes.move(to: CGPoint(x: pixel / 2, y: 0))
@@ -184,28 +201,22 @@ private struct ToScreenGraph: View {
                 axes.addLine(to: CGPoint(x: size.width - pixel / 2, y: 0))
                 context.stroke(axes, with: .color(.white), lineWidth: pixel)
 
-                guard values.count > 1 else { return }
-                let step = size.width / CGFloat(DebugInfoMonitor.graphLength - 1)
-                let start = CGFloat(DebugInfoMonitor.graphLength - values.count) * step
-                func point(_ index: Int) -> CGPoint {
-                    let fraction = min(values[index] / Self.top, 1)
-                    return CGPoint(x: start + CGFloat(index) * step, y: (size.height - 1) * (1 - fraction))
-                }
+                let width = size.width / CGFloat(DebugInfoMonitor.spans)
                 var smooth = Path()
-                var hitched = Path()
-                for index in 1..<values.count {
-                    let hitches = max(values[index - 1], values[index]) > DebugInfoView.hitch
-                    if hitches {
-                        hitched.move(to: point(index - 1))
-                        hitched.addLine(to: point(index))
+                var stuttered = Path()
+                for (index, span) in spans.enumerated() {
+                    guard let lateness = span.stutters > 0 ? max(span.lateness ?? 0, DebugInfoMonitor.stutter) : span.lateness else { continue }
+                    let height = max((size.height - 1) * CGFloat(min(lateness / Self.top, 1)), pixel)
+                    let x = size.width - CGFloat(spans.count - index) * width
+                    let bar = CGRect(x: x + pixel, y: size.height - pixel - height, width: max(width - pixel * 2, pixel), height: height)
+                    if span.stutters > 0 {
+                        stuttered.addRect(bar)
                     } else {
-                        smooth.move(to: point(index - 1))
-                        smooth.addLine(to: point(index))
+                        smooth.addRect(bar)
                     }
                 }
-                let line = StrokeStyle(lineWidth: 1, lineCap: .round)
-                context.stroke(smooth, with: .color(.blue), style: line)
-                context.stroke(hitched, with: .color(.red), style: line)
+                context.fill(smooth, with: .color(.blue))
+                context.fill(stuttered, with: .color(.red))
             }
         }
     }

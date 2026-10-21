@@ -394,11 +394,10 @@ nonisolated final class LibsharingRemoteSession: @unchecked Sendable {
             roundTripMilliseconds: statistics.roundTripMilliseconds,
             receivedBytes: statistics.receivedBytes,
             encoding: statistics.encoding.isEmpty ? nil : statistics.encoding,
+            packets: statistics.udp ? PacketStatistics(received: statistics.packets, expected: statistics.packetsExpected) : nil,
             video: statistics.highPerformance
                 ? VideoStreamStatistics(
-                    packets: statistics.videoPackets,
-                    expectedPackets: statistics.videoPacketsExpected,
-                    keyframeRequests: statistics.keyframeRequests,
+                    losses: statistics.videoLosses,
                     queuingDelayMilliseconds: statistics.queueDelayMilliseconds
                 ) : nil
         )
@@ -643,8 +642,11 @@ nonisolated private final class LibsharingHandler: NSObject, LibsharingSessionHa
         }
     }
 
-    func onFramebufferUpdate(_ x: Int32, y: Int32, width: Int32, height: Int32) {
-        delegate?.sessionFramebufferUpdated(CGRect(x: Int(x), y: Int(y), width: Int(width), height: Int(height)))
+    func onFramebufferUpdate(_ update: LibsharingFramebufferUpdate?) {
+        guard let update else { return }
+        delegate?.sessionFramebufferUpdated(
+            CGRect(x: Int(update.x), y: Int(update.y), width: Int(update.width), height: Int(update.height)),
+            arrival: CACurrentMediaTime() - Double(max(update.holdNanoseconds, 0)) / 1_000_000_000)
     }
 
     func onDisplays(_ displays: LibsharingDisplayList?) {
@@ -828,7 +830,6 @@ nonisolated private final class LibsharingHandler: NSObject, LibsharingSessionHa
 
     func onVideoAccessUnit(_ unit: LibsharingVideoAccessUnit?) {
         guard let unit, let data = unit.data else { return }
-        let hold = Double(max(unit.holdNanoseconds, 0)) / 1_000_000_000
         delegate?.sessionReceivedVideo(
             VideoAccessUnit(
                 data: data,
@@ -841,8 +842,7 @@ nonisolated private final class LibsharingHandler: NSObject, LibsharingSessionHa
                 changedBands: Int(unit.changedBands),
                 discontinuity: unit.discontinuity,
                 turns: PictureTurns(Int(unit.turns)),
-                arrival: CACurrentMediaTime() - hold,
-                libraryHold: hold
+                arrival: CACurrentMediaTime() - Double(max(unit.holdNanoseconds, 0)) / 1_000_000_000
             ))
     }
 

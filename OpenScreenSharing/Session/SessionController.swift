@@ -1775,6 +1775,7 @@ final class SessionController: Identifiable {
         for touch in touches where touch.phase == .began {
             beginPointerInput()
             nativeTouchIDs.insert(touch.id)
+            debugInfo.inputSent()
         }
         session?.sendTouches(
             touches.map { touch in
@@ -1821,10 +1822,14 @@ final class SessionController: Identifiable {
 
     func setButtons(_ buttons: PointerButtons) {
         if !buttons.contains(.primary) { remoteDragOffer = nil }
+        let pressed = !buttons.isSubset(of: pointerButtons)
         pointerButtons = buttons
         guard isControlling else {
             updateAssistCursor()
             return
+        }
+        if pressed {
+            debugInfo.inputSent()
         }
         sendPointer(buttons: buttons)
     }
@@ -1914,6 +1919,7 @@ final class SessionController: Identifiable {
     func scroll(byPixels delta: CGPoint, phase: GesturePhase) {
         guard sendsGesturesToMac else { return }
         isScrollGliding = false
+        debugInfo.inputSent()
         let point = serverPoint(pointerPosition)
         let delta = pictureTurns.pictureVector(delta)
         session?.sendScrollPhase(x: Int(point.x), y: Int(point.y), deltaX: Double(delta.x), deltaY: Double(delta.y), phase: phase)
@@ -1949,6 +1955,7 @@ final class SessionController: Identifiable {
 
     func scroll(byPixels delta: CGPoint) {
         guard isControlling else { return }
+        debugInfo.inputSent()
         let point = serverPoint(pointerPosition)
         let delta = pictureTurns.pictureVector(delta)
         session?.sendScroll(x: Int(point.x), y: Int(point.y), deltaX: Double(delta.x), deltaY: Double(delta.y))
@@ -2205,6 +2212,7 @@ final class SessionController: Identifiable {
 
     private func typeText(_ text: String) -> Bool {
         guard !text.isEmpty else { return true }
+        debugInfo.inputSent()
         if secureInput {
             let typed = text.filter(\.isASCII)
             if !typed.isEmpty { try? session?.sendText(typed) }
@@ -2632,6 +2640,9 @@ final class SessionController: Identifiable {
     }
 
     private func send(_ key: MacKey, down: Bool) {
+        if down {
+            debugInfo.inputSent()
+        }
         session?.sendKey(key, keyboardType: keyboardType, down: down)
     }
 
@@ -2689,8 +2700,8 @@ nonisolated final class SessionEventSink: @unchecked Sendable {
             output: { [weak self, pipeline] frame in
                 guard let self, !self.isDetached else { return }
                 let timing = frame.timing
-                pipeline.setVideoFrame(frame) { [weak self] picture, held in
-                    self?.pictureReady(picture, arrival: timing.arrival, hold: timing.libraryHold + held, decode: timing.decode)
+                pipeline.setVideoFrame(frame) { [weak self] picture in
+                    self?.pictureReady(picture, arrival: timing.arrival, capture: timing.capture)
                 }
             },
             failure: { [weak self] in self?.session?.requestKeyframe() },
@@ -2737,9 +2748,9 @@ nonisolated final class SessionEventSink: @unchecked Sendable {
         }
     }
 
-    private func pictureReady(_ picture: Int, arrival: CFTimeInterval, hold: TimeInterval, decode: TimeInterval) {
+    private func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?) {
         guard debugInfo.isRunning.load(ordering: .relaxed) else { return }
-        onMain { $0.debugInfo.pictureReady(picture, arrival: arrival, hold: hold, decode: decode) }
+        onMain { $0.debugInfo.pictureReady(picture, arrival: arrival, capture: capture) }
     }
 
     func sessionPhaseChanged(_ phase: SessionPhase) {
@@ -2760,12 +2771,11 @@ nonisolated final class SessionEventSink: @unchecked Sendable {
         return framebuffer
     }
 
-    func sessionFramebufferUpdated(_ dirtyRect: CGRect) {
+    func sessionFramebufferUpdated(_ dirtyRect: CGRect, arrival: CFTimeInterval) {
         guard !isDetached else { return }
-        let arrival = CACurrentMediaTime()
         do {
             if let picture = try pipeline.updateFramebuffer(dirtyRect) {
-                pictureReady(picture, arrival: arrival, hold: 0, decode: 0)
+                pictureReady(picture, arrival: arrival, capture: nil)
             }
         } catch {
             onMain { $0.drawingFailed(error) }

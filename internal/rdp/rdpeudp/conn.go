@@ -122,9 +122,11 @@ type Conn struct {
 	ackTimeout     time.Duration
 	ackNow         bool
 
-	sentPackets     uint64
-	retransmits     uint64
-	receivedPackets uint64
+	sentPackets      uint64
+	retransmits      uint64
+	receivedPackets  uint64
+	sequencedPackets uint64
+	missedPackets    uint64
 }
 
 func Dial(ctx context.Context, address string, cookie []byte, logger *slog.Logger) (*Conn, error) {
@@ -252,6 +254,12 @@ func (c *Conn) RoundTrip() time.Duration {
 	c.access.Lock()
 	defer c.access.Unlock()
 	return c.srtt
+}
+
+func (c *Conn) Packets() (expected, missed uint64) {
+	c.access.Lock()
+	defer c.access.Unlock()
+	return c.sequencedPackets, c.missedPackets
 }
 
 func (c *Conn) fail(err error) {

@@ -28,7 +28,7 @@ type SessionHandler interface {
 
 	OnFramebufferResize(width int32, height int32)
 
-	OnFramebufferUpdate(x int32, y int32, width int32, height int32)
+	OnFramebufferUpdate(update *FramebufferUpdate)
 	OnCursorImage(cursor *CursorImage)
 	OnCursorPosition(x int32, y int32)
 	OnDisplays(displays *DisplayList)
@@ -775,7 +775,7 @@ func (e *sessionEvents) FramebufferUpdated(update rfb.Update) {
 		e.session.pictureEncoding.Store(int64(largest.Encoding) + 1)
 	}
 	dirty := update.Dirty
-	e.session.handler.OnFramebufferUpdate(int32(dirty.X), int32(dirty.Y), int32(dirty.Width), int32(dirty.Height))
+	e.session.handler.OnFramebufferUpdate(&FramebufferUpdate{X: int32(dirty.X), Y: int32(dirty.Y), Width: int32(dirty.Width), Height: int32(dirty.Height)})
 }
 
 func (e *sessionEvents) CursorChanged(cursor *rfb.Cursor) {

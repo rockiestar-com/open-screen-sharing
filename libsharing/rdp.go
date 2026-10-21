@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"image"
 	"log/slog"
 	"math"
 	"net"
@@ -125,6 +124,9 @@ func (r *rdpRemote) statistics(statistics *Statistics) {
 	statistics.Encoding = clientStatistics.Encoding
 	statistics.ReceivedBytes = int64(clientStatistics.BytesRead)
 	statistics.RoundTripMilliseconds = float64(clientStatistics.RoundTrip.Microseconds()) / 1000
+	statistics.UDP = clientStatistics.UDP
+	statistics.Packets = int64(clientStatistics.PacketsExpected - clientStatistics.PacketsMissed)
+	statistics.PacketsExpected = int64(clientStatistics.PacketsExpected)
 }
 
 func (r *rdpRemote) setVisible(visible bool) error {
@@ -226,8 +228,14 @@ func (e *rdpSessionEvents) ResizeFramebuffer(width, height int) (*bgra.Image, er
 	return e.session.resizeFramebuffer(width, height)
 }
 
-func (e *rdpSessionEvents) FramebufferUpdated(rectangle image.Rectangle) {
-	e.session.handler.OnFramebufferUpdate(int32(rectangle.Min.X), int32(rectangle.Min.Y), int32(rectangle.Dx()), int32(rectangle.Dy()))
+func (e *rdpSessionEvents) FramebufferUpdated(update rdp.Update) {
+	e.session.handler.OnFramebufferUpdate(&FramebufferUpdate{
+		X:               int32(update.Rectangle.Min.X),
+		Y:               int32(update.Rectangle.Min.Y),
+		Width:           int32(update.Rectangle.Dx()),
+		Height:          int32(update.Rectangle.Dy()),
+		HoldNanoseconds: int64(update.Hold),
+	})
 }
 
 func (e *rdpSessionEvents) CursorChanged(cursor *bgra.Cursor) {
