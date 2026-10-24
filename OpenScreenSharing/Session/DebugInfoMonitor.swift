@@ -62,6 +62,7 @@ final class DebugInfoMonitor {
 
     private(set) var figures: Figures?
     private(set) var timeline: [Span] = []
+    private(set) var response: Response?
 
     var stutters: Int { timeline.reduce(0) { $0 + $1.stutters } }
 
@@ -120,7 +121,6 @@ final class DebugInfoMonitor {
         waiting = []
     }
 
-    func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?) {
     func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?, composed: CFTimeInterval?) {
         guard isRunning.load(ordering: .relaxed) else { return }
         if let lastPicture, picture <= lastPicture { return }
