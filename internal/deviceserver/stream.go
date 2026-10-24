@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	E "github.com/sagernet/sing/common/exceptions"
+	N "github.com/sagernet/sing/common/network"
 
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice"
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice/display"
@@ -283,11 +284,12 @@ func (s *Server) startVideo(ctx context.Context, a *attachment, request media.Se
 	}
 	device := a.device
 	sessionID := uuid.New()
+	readOptions := N.ReadWaitOptions{RearHeadroom: media.ServerRearHeadroom}
 	var audio *display.Stream
 	var err error
-	if s.options.Audio && request.Audio {
+	if request.Audio {
 		// The device returned a nonzero video SyncStreamToken with audio, zero without it (observed on iPad17,1, build 24B5089g).
-		audio, err = a.display.StartAudio(ctx, display.StreamOptions{SessionID: sessionID})
+		audio, err = a.display.StartAudio(ctx, display.StreamOptions{SessionID: sessionID, ReadOptions: readOptions})
 		if err != nil {
 			s.logger.Warn("start the device's sound", "error", err)
 		}
@@ -302,6 +304,7 @@ func (s *Server) startVideo(ctx context.Context, a *attachment, request media.Se
 		TilesPerFrame:  request.TilesPerFrame,
 		MaximumBitrate: uint64(max(request.MaximumBitrate, 0)),
 		PixelFormats:   uint32(request.PixelFormats),
+		ReadOptions:    readOptions,
 	})
 	if err != nil {
 		if audio != nil {
@@ -406,6 +409,7 @@ type videoSource struct {
 	lastHeard atomic.Int64
 
 	readContext                 context.Context
+	packets                     []display.Packet
 	pictureWidth, pictureHeight int
 }
 
@@ -413,31 +417,37 @@ func (v *videoSource) Info() media.ServerVideoInfo {
 	return v.info
 }
 
-func (v *videoSource) ReadPacket(ctx context.Context, buffer []byte) (int, bool, error) {
+func (v *videoSource) ReadPackets(ctx context.Context, packets []media.ServerPacket) (int, error) {
 	if v.readContext == nil {
 		readContext, cancel := context.WithCancelCause(ctx)
 		v.readContext = readContext
 		v.watchSilence(readContext, cancel)
 	}
-	n, rtcp, err := v.stream.stream.ReadPacket(v.readContext, buffer)
+	if len(v.packets) < len(packets) {
+		v.packets = make([]display.Packet, len(packets))
+	}
+	n, err := v.stream.stream.ReadPackets(v.readContext, v.packets[:len(packets)])
 	if err != nil {
 		if ctx.Err() != nil {
-			return 0, false, ctx.Err()
+			return 0, ctx.Err()
 		}
 		if errors.Is(context.Cause(v.readContext), errVideoSilent) {
 			v.server.logger.Warn("the device's video went silent; another client such as Xcode's Device Hub may have taken the screen")
 			v.server.setVideoProblem(&Error{Problem: ProblemScreenInUse, Err: errVideoSilent})
-			return 0, false, errVideoSilent
+			return 0, errVideoSilent
 		}
-		return 0, false, err
+		return 0, err
 	}
 	v.lastHeard.Store(time.Now().UnixNano())
-	if !rtcp {
-		if sps := hevcSPS(rtpPayload(buffer[:n])); sps != nil {
-			v.checkPictureSize(sps)
+	for i, packet := range v.packets[:n] {
+		if !packet.RTCP {
+			if sps := hevcSPS(rtpPayload(packet.Buffer.Bytes())); sps != nil {
+				v.checkPictureSize(sps)
+			}
 		}
+		packets[i] = media.ServerPacket{Buffer: packet.Buffer, RTCP: packet.RTCP, Arrival: packet.Arrival}
 	}
-	return n, rtcp, nil
+	return n, nil
 }
 
 func (v *videoSource) checkPictureSize(sps []byte) {
@@ -472,10 +482,6 @@ func (v *videoSource) watchSilence(readContext context.Context, cancel context.C
 	time.AfterFunc(wait, func() { v.watchSilence(readContext, cancel) })
 }
 
-func (v *videoSource) PacketArrival() time.Time {
-	return v.stream.stream.Arrival()
-}
-
 func (v *videoSource) WriteRTCP(packet []byte) error {
 	return v.stream.stream.WriteRTCP(packet)
 }
@@ -493,14 +499,22 @@ type audioSource struct {
 	manager *streamManager
 	stream  *deviceStream
 	info    media.ServerAudioInfo
+	packets []display.Packet
 }
 
 func (a *audioSource) Info() media.ServerAudioInfo {
 	return a.info
 }
 
-func (a *audioSource) ReadPacket(ctx context.Context, buffer []byte) (int, bool, error) {
-	return a.stream.stream.ReadPacket(ctx, buffer)
+func (a *audioSource) ReadPackets(ctx context.Context, packets []media.ServerPacket) (int, error) {
+	if len(a.packets) < len(packets) {
+		a.packets = make([]display.Packet, len(packets))
+	}
+	n, err := a.stream.stream.ReadPackets(ctx, a.packets[:len(packets)])
+	for i, packet := range a.packets[:n] {
+		packets[i] = media.ServerPacket{Buffer: packet.Buffer, RTCP: packet.RTCP, Arrival: packet.Arrival}
+	}
+	return n, err
 }
 
 func (a *audioSource) WriteRTCP(packet []byte) error {

@@ -3,10 +3,7 @@ package rfb
 import (
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
-
-	E "github.com/sagernet/sing/common/exceptions"
 )
 
 type Dialect int
@@ -57,15 +54,6 @@ func (q Quality) String() string {
 	}
 }
 
-func ParseQuality(name string) (Quality, error) {
-	for quality := QualityAdaptive; quality <= QualityLow; quality++ {
-		if quality.String() == name {
-			return quality, nil
-		}
-	}
-	return 0, E.New("rfb: unknown quality ", strconv.Quote(name))
-}
-
 type Mode int
 
 const (
@@ -92,8 +80,6 @@ type Options struct {
 	Username string
 	Password string
 
-	Dialect              Dialect
-	MaximumVersion       ProtocolVersion
 	SecurityTypes        []SecurityType
 	ClientName           string
 	AllowUnverifiedLogin bool
@@ -102,25 +88,15 @@ type Options struct {
 	Quality             Quality
 	Mode                Mode
 	Clipboard           bool
-	DisplayID           uint32
 	DecoderMaxPixelRate int64
 	MaximumFrameRate    int
 
 	AutomaticUpdates bool
 	UpdateInterval   time.Duration
-	Encodings        []Encoding
 
 	Logger *slog.Logger
 
-	RectangleObserver func(RawRectangle)
-
 	Prepare func(*Client)
-}
-
-type RawRectangle struct {
-	Sequence uint64
-	Rectangle
-	Payload []byte
 }
 
 type Rectangle struct {

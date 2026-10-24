@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"hash"
 	"io"
-	"sync/atomic"
 
 	E "github.com/sagernet/sing/common/exceptions"
 )
@@ -108,8 +107,6 @@ type recordReader struct {
 	decoder   recordDecoder
 	buffer    []byte
 	plaintext []byte
-	records   atomic.Uint64
-	wireBytes atomic.Uint64
 }
 
 func (r *recordReader) Read(data []byte) (int, error) {
@@ -160,8 +157,6 @@ func (r *recordReader) next() error {
 		return E.New("rfb: record body of ", bodySize, " bytes in a ", size, " byte record")
 	}
 	r.decoder.sequence++
-	r.records.Add(1)
-	r.wireBytes.Add(uint64(2 + size))
 	r.plaintext = ciphertext[2 : 2+bodySize]
 	return nil
 }

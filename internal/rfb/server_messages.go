@@ -3,10 +3,6 @@ package rfb
 import (
 	"encoding/binary"
 	"math"
-	"slices"
-	"strconv"
-
-	E "github.com/sagernet/sing/common/exceptions"
 )
 
 // ScreenSharing reads the virtual-display limit from ServerInit flag bits
@@ -15,37 +11,27 @@ import (
 // UUID EC0B2C20-F816-3FCE-822D-F9403C09EB50,
 // _RFBAuthenticateCore 0x1cc141280..0x1cc14129c,
 // _RFBMaxVirtualDisplays 0x1cc1498d8..0x1cc1498e8).
-const DefaultServerFlags = ServerFlagExtended | ServerFlagControlPrivilege | 1<<5
+const serverFlags = ServerFlagExtended | ServerFlagControlPrivilege | 1<<5
 
-var DefaultServerCommands = []uint8{
-	0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09, 0x0a, 0x0b, 0x10, 0x12, 0x15, 0x17, 0x1c, 0x1d, 0x1f, 0x21,
-}
-
-var serverParsedCommands = []uint8{
-	0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x10, 0x12, 0x15, 0x16, 0x17,
-	0x1a, 0x1c, 0x1d, 0x1f, 0x21,
-}
-
-func commandBitmap(commands []uint8) ([16]byte, error) {
+var serverCommands = func() [16]byte {
 	var bitmap [16]byte
-	for _, command := range commands {
-		if !slices.Contains(serverParsedCommands, command) {
-			return bitmap, E.New("rfb: the server cannot read client message 0x", strconv.FormatUint(uint64(command), 16))
-		}
+	for _, command := range []uint8{
+		0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09, 0x0a, 0x0b, 0x10, 0x12, 0x15, 0x17, 0x1c, 0x1d, 0x1f, 0x21,
+	} {
 		bitmap[command/8] |= 0x80 >> (command % 8)
 	}
-	return bitmap, nil
-}
+	return bitmap
+}()
 
-func serverInitMessage(width, height int, flags uint32, commands [16]byte, name string) []byte {
+func serverInitMessage(width, height int, name string) []byte {
 	message := binary.BigEndian.AppendUint16(nil, uint16(width))
 	message = binary.BigEndian.AppendUint16(message, uint16(height))
 	format := make([]byte, 16)
 	pixelFormatBGRA.encode(format)
 	message = append(message, format...)
 	extended := []byte{0, 0}
-	extended = binary.BigEndian.AppendUint32(extended, flags)
-	extended = append(extended, commands[:]...)
+	extended = binary.BigEndian.AppendUint32(extended, serverFlags)
+	extended = append(extended, serverCommands[:]...)
 	extended = append(extended, name...)
 	message = binary.BigEndian.AppendUint32(message, uint32(len(extended)))
 	return append(message, extended...)
@@ -95,7 +81,7 @@ func mediaStreamUpdate(payload []byte) []byte {
 // -[SSSession handleDisplayInfo2b:screenFlags:screenConfiguration:newSelectedScreen:displayCountChanged:]
 // 0x1cc0e1734..0x1cc0e1800,
 // -[SSSessionView dynamicResolutionModeAvailable] 0x1cc0acacc..0x1cc0acb20).
-func displayLayoutRectangle(screen ServerScreen, scale float64, flags uint32) serverRectangle {
+func displayLayoutRectangle(screen ServerScreen, scale float64) serverRectangle {
 	if !(scale > 0 && scale <= 1) {
 		scale = 1
 	}
@@ -123,7 +109,7 @@ func displayLayoutRectangle(screen ServerScreen, scale float64, flags uint32) se
 	}
 	edges(pointWidth, pointHeight)
 	edges(framebuffer[0], framebuffer[1])
-	payload = binary.BigEndian.AppendUint32(payload, flags)
+	payload = binary.BigEndian.AppendUint32(payload, DisplayFlagMain)
 	payload = append(payload, 0x20, 0x20, 0x00, 0x01, 0x00, 0xff, 0x00, 0xff, 0x00, 0xff, 0x10, 0x08, 0, 0, 0, 0)
 	binary.BigEndian.PutUint16(payload, uint16(len(payload)-2))
 	return newRectangle(0, 0, 0, 0, EncodingDisplayLayout, payload)

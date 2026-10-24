@@ -12,7 +12,7 @@ struct DiskImageImportView: View {
     var body: some View {
         WithPerceptionTracking {
             NavigationStackCompat {
-                Form {
+                SheetForm(Text("Import Disk Image")) {
                     Section {
                         Button("From Files") { isPickingFile = true }
                         NavigationLink("From a Mac") {
@@ -28,8 +28,6 @@ struct DiskImageImportView: View {
                     }
                     .disabled(store.isImporting)
                 }
-                .navigationTitle("Import Disk Image")
-                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel", role: .cancel) {
@@ -93,7 +91,7 @@ struct DiskImageDownloadView: View {
 
     var body: some View {
         WithPerceptionTracking {
-            Form {
+            SheetForm(Text("Download Disk Image")) {
                 Section {
                     Group {
                         if #available(iOS 16, *) {
@@ -116,8 +114,6 @@ struct DiskImageDownloadView: View {
                 }
                 .disabled(store.isImporting)
             }
-            .navigationTitle("Download Disk Image")
-            .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(store.isImporting)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

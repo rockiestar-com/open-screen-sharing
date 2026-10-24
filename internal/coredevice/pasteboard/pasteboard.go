@@ -115,7 +115,6 @@ type Item struct {
 
 // CoreDeviceUtilities reads UIPasteboard.changeCount into snapshot metadata
 // and returns the post-write changeCount after setItemProviders (DDI 27B5028f,
-// /Volumes/Solidigm/RE/DDI-27B5028f/CoreDeviceUtilities/disass-full.s,
 // 0x2c6fec..0x2c7064 and 0x2c8348..0x2c8384).
 type change struct {
 	nonce any

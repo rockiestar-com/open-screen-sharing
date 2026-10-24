@@ -1,5 +1,6 @@
 #if os(iOS)
 import UIKit
+import UserNotifications
 
 final class ScreenWindowTracker {
     private unowned let view: UIView
@@ -214,8 +215,29 @@ extension UIWindowScene {
 }
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        #if DEBUG || SIDELOAD
+        UNUserNotificationCenter.current().delegate = self
+        #endif
+        return true
+    }
+
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         SessionOrientation.supportedOrientations(for: window?.windowScene)
     }
 }
+
+#if DEBUG || SIDELOAD
+extension AppDelegate: UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        if response.notification.request.identifier == ServerController.problemNotification {
+            HomeRequest.shared.pending = .server
+        }
+    }
+}
+#endif
 #endif

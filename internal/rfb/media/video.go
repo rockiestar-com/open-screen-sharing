@@ -12,6 +12,7 @@ const (
 	maxHeldUnits        = 32
 	decodeOrderWait     = 150 * time.Millisecond
 	maxTrackedVideoSSRC = 16
+	frameStepWindow     = 120
 	// In AVConference video jitter-buffer mode 2, the minimum and maximum
 	// queue sizes default to 0.1 s and 0.5 s, and the video player's average
 	// decode time defaults to 1/60 s; VCDefaults can override each default
@@ -37,6 +38,7 @@ type videoAssembler struct {
 	bands        int
 	decodeOrders bool
 	sink         Sink
+	clock        *senderClock
 	onLoss       func()
 	immediate    bool
 
@@ -62,6 +64,8 @@ type videoAssembler struct {
 	frameTimestamp uint32
 	frameBands     uint32
 	frameStartedAt int64
+	frameSteps     []int64
+	framePeriod    int64
 	discontinuity  bool
 	err            error
 
@@ -92,12 +96,13 @@ type videoOutput struct {
 	due    int64
 }
 
-func newVideoAssembler(codec Codec, bands int, immediate bool, sink Sink, onLoss func()) *videoAssembler {
+func newVideoAssembler(codec Codec, bands int, immediate bool, sink Sink, clock *senderClock, onLoss func()) *videoAssembler {
 	return &videoAssembler{
 		codec:         codec,
 		bands:         bands,
 		decodeOrders:  bands > 1,
 		sink:          sink,
+		clock:         clock,
 		onLoss:        onLoss,
 		immediate:     immediate,
 		depacketizers: make(map[uint32]*ssrcDepacketizer),
@@ -421,6 +426,13 @@ func (a *videoAssembler) deliver(unit *accessUnit) {
 		return
 	}
 	if !a.frameActive {
+		if step := int64(int32(unit.timestamp - a.frameTimestamp)); a.frameID > 0 && step > 0 {
+			if len(a.frameSteps) == frameStepWindow {
+				a.frameSteps = a.frameSteps[1:]
+			}
+			a.frameSteps = append(a.frameSteps, step)
+			a.framePeriod = slices.Min(a.frameSteps)
+		}
 		a.frameID++
 		a.frameActive = true
 		a.frameTimestamp = unit.timestamp
@@ -475,6 +487,13 @@ func (a *videoAssembler) deliver(unit *accessUnit) {
 		due = a.now
 	}
 	a.playoutDelay = due - a.now
+	var composedAt time.Time
+	if displayed := a.clock.localTime(a.base, a.bands, unit.timestamp); displayed != 0 && a.framePeriod > 0 {
+		// Apple stamps a frame with the time ScreenCaptureKit gives for displaying it, one refresh
+		// period after the vsync that composed it; the refresh period is the smallest timestamp
+		// step between frames (observed on Mac14,3, macOS 27.0.1 26A434, at 30 and 60 Hz).
+		composedAt = time.Unix(0, displayed-rtpDuration(a.framePeriod))
+	}
 	a.outbox = append(a.outbox, videoOutput{due: due, unit: VideoAccessUnit{
 		Data:          unit.data,
 		Timestamp:     timestamp,
@@ -490,6 +509,7 @@ func (a *videoAssembler) deliver(unit *accessUnit) {
 		Turns:         unit.turns,
 		ReceivedAt:    time.Unix(0, unit.receivedAt),
 		CompletedAt:   time.Unix(0, unit.completedAt),
+		ComposedAt:    composedAt,
 	}})
 	a.discontinuity = false
 	if frameEnd {

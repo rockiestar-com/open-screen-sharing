@@ -33,14 +33,7 @@ func newClipboardBridge(server *Server, logger *slog.Logger) *clipboardBridge {
 	return &clipboardBridge{server: server, logger: logger, sharers: make(map[*rfb.ServerSession]bool)}
 }
 
-func (c *clipboardBridge) enabled() bool {
-	return c.server.options.SharedClipboard
-}
-
 func (c *clipboardBridge) sharing(session *rfb.ServerSession, enabled bool) {
-	if !c.enabled() {
-		return
-	}
 	c.access.Lock()
 	if enabled {
 		c.sharers[session] = true
@@ -52,9 +45,6 @@ func (c *clipboardBridge) sharing(session *rfb.ServerSession, enabled bool) {
 }
 
 func (c *clipboardBridge) update() {
-	if !c.enabled() {
-		return
-	}
 	a := c.server.currentDevice()
 	c.access.Lock()
 	defer c.access.Unlock()
@@ -106,9 +96,6 @@ func (c *clipboardBridge) update() {
 }
 
 func (c *clipboardBridge) read(ctx context.Context) (*rfb.Clipboard, error) {
-	if !c.enabled() {
-		return &rfb.Clipboard{}, nil
-	}
 	c.access.Lock()
 	latest := c.latest
 	c.access.Unlock()
@@ -133,9 +120,6 @@ func (c *clipboardBridge) read(ctx context.Context) (*rfb.Clipboard, error) {
 }
 
 func (c *clipboardBridge) viewerClipboard(clipboard *rfb.Clipboard) {
-	if !c.enabled() {
-		return
-	}
 	c.access.Lock()
 	c.writing = clipboard
 	c.access.Unlock()

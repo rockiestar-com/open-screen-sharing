@@ -229,7 +229,7 @@ final class ScreenRenderer {
 
     func render(
         _ frame: Frame, in layer: CAMetalLayer,
-        presented: @escaping @Sendable (CFTimeInterval) -> Void,
+        presented: @escaping @Sendable (_ time: CFTimeInterval, _ composited: Bool) -> Void,
         failed: @escaping @Sendable () -> Void
     ) -> Bool {
         var retained: [CVMetalTexture] = []
@@ -325,19 +325,30 @@ final class ScreenRenderer {
             }
             #if targetEnvironment(simulator)
             if containsImage {
-                presented(CACurrentMediaTime())
+                presented(CACurrentMediaTime(), false)
             }
             #endif
         }
         #if !targetEnvironment(simulator)
         drawable.addPresentedHandler { drawable in
             let time = drawable.presentedTime
+            #if os(macOS)
+            // On a virtual display presentedTime stays 0, and the handler runs about 2 ms after the vsync at
+            // which WindowServer composites the drawable; the composite is displayed at the following vsync
+            // (observed on Mac14,3, macOS 27.0.1 26A434, against ScreenCaptureKit display times).
+            if time == 0 {
+                if containsImage {
+                    presented(CACurrentMediaTime(), true)
+                }
+                return
+            }
+            #endif
             guard time.isFinite, time > 0 else {
                 failed()
                 return
             }
             if containsImage {
-                presented(time)
+                presented(time, false)
             }
         }
         #endif
@@ -490,6 +501,12 @@ final class ScreenPresenter {
     private var presentationTick: CFTimeInterval = 0
     private var needsRender = true
     private var renderedThisFrame = false
+    private var commits = 0
+    private var drainedThrough = 0
+    private var presentationDepth = 1
+    private var excessDepth = 0
+    private var drained = false
+    private var drainsNext = false
     private var idleFrames = 0
     private var lastSnapshot: DisplayPipeline.Snapshot?
     private var refreshRate = 0
@@ -567,6 +584,7 @@ final class ScreenPresenter {
             presentationTick = displayLink.targetTimestamp
             let midpoint = (displayLink.timestamp + displayLink.targetTimestamp) / 2
             presentationTimer?.schedule(deadline: .now() + max(midpoint - CACurrentMediaTime(), 0), leeway: .microseconds(100))
+            return
         }
         let snapshot = pipeline.consume(through: displayLink?.timestamp ?? CACurrentMediaTime())
         if let snapshot {
@@ -583,15 +601,26 @@ final class ScreenPresenter {
     }
 
     private func presentScheduledFrames() {
-        guard !screen.isOccluded, let snapshot = pipeline.consume(through: presentationTick) else { return }
-        lastSnapshot = snapshot
+        guard !screen.isOccluded else { return }
+        let snapshot = pipeline.consume(through: presentationTick)
+        if let snapshot {
+            lastSnapshot = snapshot
+        }
+        guard snapshot != nil || needsRender else {
+            idleFrames += 1
+            if idleFrames > 30 { displayLink?.isPaused = true }
+            return
+        }
         idleFrames = 0
+        renderedThisFrame = true
         needsRender = !render()
     }
 
     private func contentChanged() {
         wake()
-        guard !renderedThisFrame, !screen.isOccluded, let snapshot = pipeline.consume(through: CACurrentMediaTime()) else { return }
+        guard !pipeline.isSchedulingPresentation, !renderedThisFrame, !screen.isOccluded,
+            let snapshot = pipeline.consume(through: CACurrentMediaTime())
+        else { return }
         lastSnapshot = snapshot
         renderedThisFrame = true
         needsRender = !render()
@@ -603,7 +632,38 @@ final class ScreenPresenter {
         displayLink?.isPaused = false
     }
 
+    // Core Animation shows the drawables presented to a CAMetalLayer one per refresh, oldest first, so a second
+    // drawable within one refresh delays every later one by a refresh for as long as one is presented each refresh
+    // (observed on Mac14,3, macOS 27.0.1 26A434).
+    private func drawablePresented(_ commit: Int, committed: CFTimeInterval, at time: CFTimeInterval) {
+        guard commit > drainedThrough, let link = displayLink, link.duration > 0 else { return }
+        let latched = link.timestamp + ((committed - link.timestamp) / link.duration).rounded(.up) * link.duration
+        guard latched - committed > link.duration / 4 else { return }
+        let depth = Int(((time - latched) / link.duration).rounded())
+        if depth <= presentationDepth {
+            presentationDepth = depth
+            excessDepth = 0
+            drained = false
+            return
+        }
+        excessDepth += 1
+        guard excessDepth >= 3 else { return }
+        excessDepth = 0
+        if drained {
+            presentationDepth = depth
+            drained = false
+            return
+        }
+        drained = true
+        drainsNext = true
+        drainedThrough = commits
+    }
+
     private func render() -> Bool {
+        if drainsNext {
+            drainsNext = false
+            return false
+        }
         let viewSize = screen.bounds.size
         guard let renderer, viewSize.width > 0, viewSize.height > 0 else { return false }
         let snapshot = lastSnapshot ?? pipeline.snapshot()
@@ -657,7 +717,9 @@ final class ScreenPresenter {
         #if os(iOS)
         screen.cursorDidRender(in: cursorRect)
         #endif
-        return renderer.render(
+        let committed = CACurrentMediaTime()
+        let commit = commits &+ 1
+        let rendered = renderer.render(
             ScreenRenderer.Frame(
                 pixelBuffer: snapshot.pixelBuffer,
                 framebuffer: snapshot.framebuffer,
@@ -674,8 +736,14 @@ final class ScreenPresenter {
                 pixelsPerCursorPixel: cursorScale * layer.contentsScale
             ),
             in: layer,
-            presented: { [pipeline, debugInfo = controller.debugInfo] time in
+            presented: { [weak self, pipeline, debugInfo = controller.debugInfo] time, composited in
                 DispatchQueue.main.async {
+                    var time = time
+                    if composited {
+                        guard let link = self?.displayLink, link.duration > 0 else { return }
+                        time = link.timestamp + ((time - link.timestamp) / link.duration).rounded(.up) * link.duration
+                    }
+                    self?.drawablePresented(commit, committed: committed, at: time)
                     guard let generation, let run, pipeline.isCurrentPresentation(epoch: epoch) else { return }
                     debugInfo.picturePresented(generation, at: time, run: run)
                 }
@@ -687,6 +755,10 @@ final class ScreenPresenter {
                 }
             }
         )
+        if rendered {
+            commits = commit
+        }
+        return rendered
     }
 }
 

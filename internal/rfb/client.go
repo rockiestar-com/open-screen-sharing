@@ -91,8 +91,6 @@ type Client struct {
 
 	decoders     decoders
 	cursors      map[uint32]*Cursor
-	updates      atomic.Uint64
-	rectangles   atomic.Uint64
 	pendingRekey bool
 	rekeyKeys    recordKeys
 	running      bool
@@ -103,33 +101,32 @@ type Client struct {
 	height            int
 	size              atomic.Uint64
 
-	mediaLifecycle        sync.Mutex
-	access                sync.Mutex
-	mode                  Mode
-	quality               Quality
-	mediaStream           bool
-	mediaStopping         bool
-	preparing             bool
-	sharedClipboard       bool
-	media                 *mediaSession
-	fileCopy              *filecopy.Manager
-	pushing               bool
-	downloading           bool
-	updateInterval        time.Duration
-	scale                 float64
-	buttons               uint8
-	heldKeys              map[uint32]bool
-	scrollRemainderX      float64
-	scrollRemainderY      float64
-	layout                *DisplayLayout
-	clipboardEcho         uint32
-	virtualDisplay        *virtualDisplayRequest
-	heldDisplay           []heldDisplayChange
-	hdr                   bool
-	mediaStarted          bool
-	accessibilitySettings uint32
-	gestures              gestureState
-	keyboard              keyboardState
+	mediaLifecycle   sync.Mutex
+	access           sync.Mutex
+	mode             Mode
+	quality          Quality
+	mediaStream      bool
+	mediaStopping    bool
+	preparing        bool
+	sharedClipboard  bool
+	media            *mediaSession
+	fileCopy         *filecopy.Manager
+	pushing          bool
+	downloading      bool
+	updateInterval   time.Duration
+	scale            float64
+	buttons          uint8
+	heldKeys         map[uint32]bool
+	scrollRemainderX float64
+	scrollRemainderY float64
+	layout           *DisplayLayout
+	clipboardEcho    uint32
+	virtualDisplay   *virtualDisplayRequest
+	heldDisplay      []heldDisplayChange
+	hdr              bool
+	mediaStarted     bool
+	gestures         gestureState
+	keyboard         keyboardState
 
 	lastUpdate     atomic.Int64
 	pixelsReceived atomic.Bool
@@ -278,8 +275,14 @@ func (c *Client) startApple() error {
 		prelude = append(prelude, autoPasteboardMessage(true)...)
 	}
 	prelude = append(prelude, 0x12, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1)
-	prelude = append(prelude, 0x12, 0, 0, 2, 0, 1, 0, 0)
-	_, err := c.conn.Write(prelude)
+	// ScreenSharing configures the session in plain text after the first
+	// SetEncryption and sends the second only after the server's keys arrive.
+	// screensharingd holds those keys while its displays sleep, and its
+	// SetEncodings handler declares user activity to wake them
+	// (ScreenSharing 776.27, macOS 27.0.1 26A434, UUID EC0B2C20-F816-3FCE-822D-F9403C09EB50,
+	// -[SSSession stConfigureSession] 0x1cc05fc10..0x1cc060590, _HandleFramebufferUpdate 0x1cc1511c4..0x1cc151e60;
+	// screensharingd 756.36.5.2, SendFrameBuffer 0x100021a5c..0x100021ae8, HandleSetEncodingsMessage 0x1000386b0).
+	err := c.writer.Write(append([][]byte{prelude}, c.firstMessages(c.prepare())...))
 	if err != nil {
 		return err
 	}
@@ -290,6 +293,10 @@ func (c *Client) startApple() error {
 			return E.Cause(err, "wait for the record layer")
 		}
 	}
+	err = c.writer.Write([][]byte{{0x12, 0, 0, 2, 0, 1, 0, 0}})
+	if err != nil {
+		return err
+	}
 	encoder := &recordEncoder{}
 	err = encoder.rekey(c.rekeyKeys)
 	if err != nil {
@@ -297,7 +304,7 @@ func (c *Client) startApple() error {
 	}
 	c.writer.SetEncoder(encoder.encode)
 	c.logger.Debug("record layer active")
-	return c.writer.Write(c.firstMessages(c.prepare()))
+	return nil
 }
 
 func (c *Client) firstMessages(displayChanges [][]byte) [][]byte {
@@ -309,9 +316,6 @@ func (c *Client) firstMessages(displayChanges [][]byte) [][]byte {
 	// -[SSSession stConfigureVirtualDisplaysWithDimensions:] 0x1cc0da478).
 	messages = append(messages, displayChanges...)
 	messages = append(messages, setEncodingsMessage(c.encodings()))
-	if c.options.DisplayID != 0 {
-		messages = append(messages, setDisplayMessage(c.options.DisplayID))
-	}
 	c.pushing = c.options.AutomaticUpdates && c.info.Accepts(0x09)
 	return append(messages, c.updateRequests(c.info.Width, c.info.Height)...)
 }
@@ -348,21 +352,14 @@ func (c *Client) encodings() []Encoding {
 	c.access.Lock()
 	quality, mediaStream := c.quality, c.mediaStream
 	c.access.Unlock()
-	picture := c.options.Encodings
 	if c.info.Dialect != DialectApple {
-		if len(picture) == 0 {
-			picture = standardPictureEncodings
-		}
-		return append(slices.Clone(picture), standardMetadataEncodings...)
-	}
-	if len(picture) == 0 {
-		picture = applePictureEncodings(quality)
+		return append(slices.Clone(standardPictureEncodings), standardMetadataEncodings...)
 	}
 	var encodings []Encoding
 	if mediaStream {
 		encodings = append(encodings, EncodingMediaStream)
 	}
-	encodings = append(encodings, picture...)
+	encodings = append(encodings, applePictureEncodings(quality)...)
 	return append(encodings, appleMetadataEncodings...)
 }
 
@@ -569,31 +566,9 @@ func (c *Client) SetFramebuffer(framebuffer *bgra.Image) error {
 	return c.RequestRefresh()
 }
 
-func (c *Client) Framebuffer(fn func(*bgra.Image)) {
-	c.framebufferAccess.Lock()
-	defer c.framebufferAccess.Unlock()
-	fn(c.framebuffer)
-}
-
 func (c *Client) FramebufferSize() (int, int) {
 	size := c.size.Load()
 	return int(size >> 32), int(uint32(size))
-}
-
-func (c *Client) Statistics() Statistics {
-	statistics := Statistics{Updates: c.updates.Load(), Rectangles: c.rectangles.Load()}
-	if c.stream.records != nil {
-		statistics.Records = c.stream.records.records.Load()
-		statistics.WireBytes = c.stream.records.wireBytes.Load()
-	}
-	return statistics
-}
-
-type Statistics struct {
-	Updates    uint64
-	Rectangles uint64
-	Records    uint64
-	WireBytes  uint64
 }
 
 func (c *Client) receiveMessage() error {
@@ -652,7 +627,6 @@ func (c *Client) receiveFramebufferUpdate() error {
 	if err != nil {
 		return err
 	}
-	c.updates.Add(1)
 	c.lastUpdate.Store(time.Now().UnixNano())
 	if !update.Dirty.Empty() {
 		if !c.pixelsReceived.Swap(true) {
@@ -697,16 +671,7 @@ func (c *Client) receiveRectangles(count int) (Update, error) {
 		if rectangle.Encoding == EncodingLastRect {
 			break
 		}
-		sequence := c.rectangles.Add(1)
-		observe := c.options.RectangleObserver != nil
-		if observe {
-			c.stream.startCapture()
-		}
 		err = c.receiveRectangle(rectangle)
-		if observe {
-			payload := c.stream.stopCapture()
-			c.options.RectangleObserver(RawRectangle{Sequence: sequence, Rectangle: rectangle, Payload: payload})
-		}
 		if err != nil {
 			return update, E.Cause(err, "read ", rectangle.Encoding, " rectangle ", rectangle)
 		}
@@ -880,16 +845,6 @@ func (c *Client) SelectDisplay(id uint32) error {
 	c.access.Lock()
 	defer c.access.Unlock()
 	return c.sendDisplayChangeLocked(setDisplayMessage(id), true)
-}
-
-func (c *Client) SetScale(factor float64) error {
-	if !(factor > 0 && factor <= 1) {
-		return E.New("rfb: scale ", factor, " is outside (0, 1]")
-	}
-	message := make([]byte, 10)
-	message[0] = 0x08
-	binary.BigEndian.PutUint64(message[2:], math.Float64bits(factor))
-	return c.send(message)
 }
 
 func (c *Client) rearm(width, height int) error {

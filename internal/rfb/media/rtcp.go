@@ -3,6 +3,7 @@ package media
 import (
 	"encoding/binary"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -12,6 +13,7 @@ const (
 	rtcpReceiverReport   = 201
 	rtcpApplication      = 204
 	maxReportBlocks      = 8
+	senderClockWindow    = 30 * time.Second
 )
 
 type receptionStats struct {
@@ -143,12 +145,42 @@ func rtcpPackets(compound []byte, fn func(packet []byte)) {
 	}
 }
 
-func senderReports(compound []byte, fn func(ssrc uint32, ntpMiddle uint32)) {
+func senderReports(compound []byte, fn func(ssrc uint32, ntpMiddle uint32, timestamp uint32)) {
 	rtcpPackets(compound, func(packet []byte) {
 		if packet[1] == rtcpSenderReport && len(packet) >= 28 {
-			fn(binary.BigEndian.Uint32(packet[4:]), binary.BigEndian.Uint32(packet[10:]))
+			fn(binary.BigEndian.Uint32(packet[4:]), binary.BigEndian.Uint32(packet[10:]), binary.BigEndian.Uint32(packet[16:]))
 		}
 	})
+}
+
+type senderClock struct {
+	reports []clockReport
+}
+
+type clockReport struct {
+	ssrc      uint32
+	timestamp uint32
+	at        int64
+}
+
+func (c *senderClock) observe(ssrc uint32, timestamp uint32, at int64) {
+	c.reports = slices.DeleteFunc(c.reports, func(report clockReport) bool {
+		return at-report.at > int64(senderClockWindow)
+	})
+	c.reports = append(c.reports, clockReport{ssrc: ssrc, timestamp: timestamp, at: at})
+}
+
+func (c *senderClock) localTime(base uint32, bands int, timestamp uint32) (local int64) {
+	for _, report := range c.reports {
+		if report.ssrc-base >= uint32(bands) {
+			continue
+		}
+		estimate := report.at - rtpDuration(int64(int32(report.timestamp-timestamp)))
+		if local == 0 || estimate < local {
+			local = estimate
+		}
+	}
+	return
 }
 
 type rateFeedback struct {

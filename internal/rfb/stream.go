@@ -10,11 +10,7 @@ import (
 type stream struct {
 	raw     *bufio.Reader
 	source  io.Reader
-	records *recordReader
-
-	capturing bool
-	captured  []byte
-	scratch   [8]byte
+	scratch [8]byte
 }
 
 func newStream(conn net.Conn) *stream {
@@ -28,7 +24,6 @@ func (s *stream) startRecords(keys recordKeys) error {
 	if err != nil {
 		return err
 	}
-	s.records = records
 	s.source = records
 	return nil
 }
@@ -43,13 +38,7 @@ func (s *stream) Read(data []byte) (int, error) {
 
 func (s *stream) readFull(data []byte) error {
 	_, err := io.ReadFull(s.source, data)
-	if err != nil {
-		return err
-	}
-	if s.capturing {
-		s.captured = append(s.captured, data...)
-	}
-	return nil
+	return err
 }
 
 func (s *stream) bytes(length int) ([]byte, error) {
@@ -84,14 +73,4 @@ func (s *stream) discard(length int) error {
 		length -= chunk
 	}
 	return nil
-}
-
-func (s *stream) startCapture() {
-	s.capturing = true
-	s.captured = s.captured[:0]
-}
-
-func (s *stream) stopCapture() []byte {
-	s.capturing = false
-	return s.captured
 }

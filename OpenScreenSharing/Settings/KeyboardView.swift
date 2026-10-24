@@ -375,7 +375,7 @@ private struct KeyMappingEditor: View {
 
     var body: some View {
         NavigationStackCompat {
-            Form {
+            SheetForm(isNew ? Text("Add Mapping") : Text("Edit Mapping")) {
                 Section {
                     HStack {
                         Text("Shortcut")
@@ -492,11 +492,7 @@ private struct KeyMappingEditor: View {
             }
             #if os(iOS)
             .environment(\.editMode, .constant(.active))
-            .navigationBarTitleDisplayMode(.inline)
-            #else
-            .formStyle(.grouped)
             #endif
-            .navigationTitle(isNew ? String(localized: "Add Mapping") : String(localized: "Edit Mapping"))
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

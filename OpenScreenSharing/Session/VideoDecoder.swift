@@ -43,6 +43,7 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
         var id: Int64
         var arrival: CFTimeInterval
         var capture: CFTimeInterval
+        var composed: CFTimeInterval?
         var turns: PictureTurns
         var submittedMask = 0
         var ended = false
@@ -184,7 +185,7 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
                 return
             }
             pending.append(PendingFrame(
-                id: unit.frameID, arrival: unit.arrival, capture: unit.presentationTime.seconds,
+                id: unit.frameID, arrival: unit.arrival, capture: unit.presentationTime.seconds, composed: unit.composed,
                 turns: unit.turns,
                 latestTickets: Array(repeating: nil, count: bands), strips: Array(repeating: nil, count: bands)))
             lastSubmittedFrameID = unit.frameID
@@ -272,7 +273,7 @@ nonisolated final class VideoDecoder: @unchecked Sendable {
                     strips: bands == 1 ? [] : strips,
                     canvasHeight: canvasHeight,
                     turns: first.turns,
-                    timing: FrameTiming(arrival: first.arrival, capture: first.capture))
+                    timing: FrameTiming(arrival: first.arrival, capture: first.capture, composed: first.composed))
                 output(frame)
             }
         }

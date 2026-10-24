@@ -34,6 +34,7 @@ type VideoAccessUnit struct {
 	Turns         int
 	ReceivedAt    time.Time
 	CompletedAt   time.Time
+	ComposedAt    time.Time
 }
 
 type AudioFormat struct {

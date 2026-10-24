@@ -2,6 +2,7 @@ import Foundation
 import Libsharing
 import Perception
 import UIKit
+import UserNotifications
 import dnssd
 import os
 
@@ -9,6 +10,7 @@ import os
 final class ServerController {
     static let shared = ServerController()
     nonisolated private static let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "OpenScreenSharing", category: "server")
+    nonisolated static let problemNotification = "server-problem"
 
     enum Phase: Equatable {
         case stopped
@@ -39,8 +41,6 @@ final class ServerController {
 
     private(set) var advertisedName: String?
     private(set) var localNetworkDenied = false
-    private(set) var backgroundProblem: String?
-    private(set) var autoUnlockProblem: String?
     private(set) var tunnelFound: Bool?
     private(set) var tunnelThroughLocalNetwork = false
 
@@ -59,14 +59,10 @@ final class ServerController {
     @PerceptionIgnored private lazy var audio: BackgroundAudio = {
         let audio = BackgroundAudio()
         audio.onPlayingChange = { [weak self] in
-            guard let self else { return }
-            if self.audio.isPlaying {
-                self.backgroundProblem = nil
-            }
-            self.updateIdleTimer()
+            self?.updateIdleTimer()
         }
         audio.onFailure = { [weak self] error in
-            self?.backgroundProblem = error.localizedDescription
+            self?.fail(ServerProblem(kind: .other, message: error.localizedDescription))
         }
         return audio
     }()
@@ -167,7 +163,11 @@ final class ServerController {
             return
         }
         settings.isEnabled = true
-        autoUnlockProblem = nil
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
+            if let error {
+                Self.logger.error("Request notification authorization: \(error.localizedDescription, privacy: .public)")
+            }
+        }
         generation += 1
         let generation = generation
         phase = .starting
@@ -220,16 +220,6 @@ final class ServerController {
                     self.volume.setWatched(!self.viewers.isEmpty)
                     self.brightness.setWatched(!self.viewers.isEmpty, server: self.server)
                 }
-            },
-            autoUnlockFailed: { [weak self] message, inputStarted in
-                DispatchQueue.main.async {
-                    guard let self, generation == self.generation else { return }
-                    if inputStarted {
-                        self.autoUnlockProblem = String(localized: "Automatic unlock was turned off. Stop sharing and check the device passcode before trying again.") + "\n" + message
-                    } else {
-                        self.autoUnlockProblem = message
-                    }
-                }
             })
         let request = UncheckedSendable(value: options)
         let result = await withCheckedContinuation { continuation in
@@ -248,9 +238,6 @@ final class ServerController {
             }
             if let port = remotePairing.port, Int32(port) != options.remotePairingPort {
                 box.value.setRemotePairingPort(Int32(port))
-            }
-            if !settings.autoUnlocks {
-                box.value.disableAutoUnlock()
             }
             do {
                 try box.value.start()
@@ -352,11 +339,25 @@ final class ServerController {
     }
 
     private func phaseChanged() {
+        let notifications = UNUserNotificationCenter.current()
+        if case .failed(let problem) = phase {
+            let content = UNMutableNotificationContent()
+            content.title = problem.title
+            content.body = problem.message
+            content.sound = .default
+            notifications.add(UNNotificationRequest(identifier: Self.problemNotification, content: content, trigger: nil)) { error in
+                if let error {
+                    Self.logger.error("Post the sharing problem: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        } else {
+            notifications.removeDeliveredNotifications(withIdentifiers: [Self.problemNotification])
+        }
         if !phase.isActive {
             viewers.removeAll()
             volume.setWatched(false)
         } else if phase.isRunning, viewers.isEmpty, let server {
-            brightness.restore(server, locks: false)
+            brightness.restore(server)
         }
         updateBackground()
         setBrowsing(phase.isActive)
@@ -374,7 +375,6 @@ final class ServerController {
             audio.start()
         } else {
             audio.stop()
-            backgroundProblem = nil
         }
         updateIdleTimer()
     }

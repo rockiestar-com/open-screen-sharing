@@ -39,7 +39,7 @@ struct ConnectToView: View {
 
     var body: some View {
         WithPerceptionTracking {
-            Form {
+            SheetForm(Text("New Connection")) {
                 Section {
                     TextField("Server Address", text: $text, prompt: Text("Hostname"))
                         #if os(iOS)
@@ -97,12 +97,6 @@ struct ConnectToView: View {
                     }
                 }
             }
-            .navigationTitle("New Connection")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #else
-            .formStyle(.grouped)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", role: .cancel) {

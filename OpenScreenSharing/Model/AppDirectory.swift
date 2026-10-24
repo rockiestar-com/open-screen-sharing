@@ -1,10 +1,22 @@
 import Foundation
+import os
 
 nonisolated enum AppDirectory {
     #if os(macOS)
     static let group = FileManager.default.containerURL(
         forSecurityApplicationGroupIdentifier: Bundle.main.object(forInfoDictionaryKey: "AppGroupIdentifier") as! String)!
-    static let caches = group.appendingPathComponent("Library/Caches", isDirectory: true)
+    static let caches: URL = {
+        var caches = group.appendingPathComponent("Library/Caches", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try caches.setResourceValues(values)
+        } catch {
+            StorageNotice.logger.error("exclude caches from backup: \(error, privacy: .public)")
+        }
+        return caches
+    }()
     #else
     static let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
     #endif

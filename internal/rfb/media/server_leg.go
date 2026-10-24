@@ -9,6 +9,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/sagernet/sing/common/buf"
+	E "github.com/sagernet/sing/common/exceptions"
+	N "github.com/sagernet/sing/common/network"
 )
 
 const (
@@ -69,6 +73,8 @@ type serverLeg struct {
 	initialTarget netip.AddrPort
 	target        netip.AddrPort
 	latched       bool
+	peer          netip.AddrPort
+	writer        N.ConnectedPacketBatchWriter
 	pending       []pendingDatagram
 	clientKey     [masterKeyLength]byte
 	serverKey     [masterKeyLength]byte
@@ -83,12 +89,6 @@ type serverLeg struct {
 	deviceReports map[uint32]*deviceReport
 	clientRTT     time.Duration
 	timing        serverTiming
-
-	packets       uint64
-	octets        uint64
-	clientReports uint64
-	authFailures  uint64
-	sendErrors    uint64
 }
 
 func newServerLeg(name string, conn *net.UDPConn, clockRate float64, initial netip.Addr, logger *slog.Logger) *serverLeg {
@@ -109,12 +109,11 @@ func newServerLeg(name string, conn *net.UDPConn, clockRate float64, initial net
 	return leg
 }
 
-func (l *serverLeg) setKeys(stream *serverOfferStream, now time.Time) {
+func (l *serverLeg) setKeys(stream *serverOfferStream, now time.Time) error {
 	l.access.Lock()
 	defer l.access.Unlock()
 	if l.receiver != nil && l.clientKey == stream.clientKey && l.serverKey == stream.serverKey {
-		l.checkPendingLocked(now)
-		return
+		return l.checkPendingLocked(now)
 	}
 	l.clientKey, l.serverKey = stream.clientKey, stream.serverKey
 	l.receiver = newSRTCPReceiver(stream.clientKey[:])
@@ -124,21 +123,27 @@ func (l *serverLeg) setKeys(stream *serverOfferStream, now time.Time) {
 	l.sentReports = [sentReportSlots]sentReport{}
 	l.clientRTT = 0
 	l.target, l.latched = l.initialTarget, false
-	l.checkPendingLocked(now)
+	if l.peer.IsValid() {
+		l.target = l.peer
+	}
+	return l.checkPendingLocked(now)
 }
 
-func (l *serverLeg) checkPendingLocked(now time.Time) {
+func (l *serverLeg) checkPendingLocked(now time.Time) error {
 	pending := l.pending
 	l.pending = nil
 	for _, datagram := range pending {
 		if now.Sub(datagram.at) > pendingLifetime {
 			continue
 		}
-		_, err := l.receiver.unprotect(datagram.data)
-		if err == nil {
-			l.latchLocked(datagram.from)
+		if _, err := l.receiver.unprotect(datagram.data); err != nil {
+			continue
+		}
+		if _, err := l.latchLocked(datagram.from); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 func (l *serverLeg) keepPendingLocked(datagram []byte, from netip.AddrPort, now time.Time) {
@@ -148,41 +153,24 @@ func (l *serverLeg) keepPendingLocked(datagram []byte, from netip.AddrPort, now 
 	l.pending = append(l.pending, pendingDatagram{data: append([]byte(nil), datagram...), from: from, at: now})
 }
 
-func (l *serverLeg) latchLocked(from netip.AddrPort) bool {
+func (l *serverLeg) latchLocked(from netip.AddrPort) (bool, error) {
 	from = netip.AddrPortFrom(from.Addr().Unmap(), from.Port())
 	if l.latched && l.target == from {
-		return false
+		return false, nil
+	}
+	if l.peer != from {
+		writer, err := connectLeg(l.conn, from)
+		if err != nil {
+			return false, E.Cause(err, "connect the ", l.name, " socket to ", from)
+		}
+		l.peer, l.writer = from, writer
 	}
 	previous := l.target
 	l.target, l.latched = from, true
 	l.logger.Debug("media client address", "leg", l.name, "address", from, "previous", previous)
 	held := l.held
 	l.held = 0
-	return held > 0
-}
-
-type serverLegSnapshot struct {
-	packets       uint64
-	octets        uint64
-	held          uint64
-	clientReports uint64
-	authFailures  uint64
-	sendErrors    uint64
-	target        netip.AddrPort
-}
-
-func (l *serverLeg) snapshot() serverLegSnapshot {
-	l.access.Lock()
-	defer l.access.Unlock()
-	return serverLegSnapshot{
-		packets:       l.packets,
-		octets:        l.octets,
-		held:          l.held,
-		clientReports: l.clientReports,
-		authFailures:  l.authFailures,
-		sendErrors:    l.sendErrors,
-		target:        l.target,
-	}
+	return held > 0, nil
 }
 
 func (l *serverLeg) currentTarget() netip.AddrPort {
@@ -225,23 +213,23 @@ func (l *serverLeg) outputLocked(ssrc uint32, generation uint64, sequence uint16
 	return output
 }
 
-func (l *serverLeg) protectLocked(packet []byte, header rtpPacket, generation uint64, now time.Time) ([]byte, netip.AddrPort, bool) {
+func (l *serverLeg) protectLocked(packet []byte, header rtpPacket, generation uint64, now time.Time) ([]byte, bool) {
 	if l.active == nil || l.active.generation != generation {
-		return nil, netip.AddrPort{}, false
+		return nil, false
 	}
 	if !l.target.IsValid() {
 		l.held++
-		return nil, netip.AddrPort{}, false
+		return nil, false
 	}
 	output := l.outputLocked(header.ssrc, generation, header.sequence)
 	if output == nil {
-		return nil, netip.AddrPort{}, false
+		return nil, false
 	}
 	sequence := header.sequence + output.offset
 	binary.BigEndian.PutUint16(packet[2:], sequence)
 	index := output.replay.estimateIndex(sequence)
 	if !output.replay.check(index) {
-		return nil, netip.AddrPort{}, false
+		return nil, false
 	}
 	output.replay.accept(index)
 	if !output.based {
@@ -258,21 +246,25 @@ func (l *serverLeg) protectLocked(packet []byte, header rtpPacket, generation ui
 	output.lastSentAt = now
 	output.packets++
 	output.octets += uint32(len(packet) - header.payloadOffset)
-	l.packets++
-	l.octets += uint64(len(packet))
-	return l.sender.protect(packet, header.payloadOffset, index), l.target, true
+	return l.sender.protect(packet, header.payloadOffset, index), true
 }
 
-func (l *serverLeg) send(datagram []byte, target netip.AddrPort) {
-	_, err := l.conn.WriteToUDPAddrPort(datagram, target)
-	if err == nil {
-		return
+func (l *serverLeg) send(datagrams []*buf.Buffer, target netip.AddrPort, writer N.ConnectedPacketBatchWriter) {
+	var err error
+	if writer != nil {
+		err = writer.WriteConnectedPacketBatch(datagrams)
+	} else {
+		for _, datagram := range datagrams {
+			if err == nil {
+				_, err = l.conn.WriteToUDPAddrPort(datagram.Bytes(), target)
+			}
+			datagram.Release()
+		}
 	}
-	if errors.Is(err, net.ErrClosed) {
+	if err == nil || errors.Is(err, net.ErrClosed) {
 		return
 	}
 	l.access.Lock()
-	l.sendErrors++
 	l.timing.interval.sendErrors++
 	l.timing.interval.lastSendError = err
 	l.access.Unlock()

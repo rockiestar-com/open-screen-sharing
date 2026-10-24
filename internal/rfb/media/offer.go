@@ -150,13 +150,11 @@ const (
 	PixelFormat420Alpha           PixelFormats = 1 << 6
 	PixelFormat444Alpha16         PixelFormats = 1 << 7
 
-	PixelFormatsSDR420    PixelFormats = PixelFormat420FullRange | PixelFormat420VideoRange
-	PixelFormatsChroma420 PixelFormats = PixelFormat420FullRange | PixelFormat420VideoRange | PixelFormat420TenBit
+	PixelFormatsSDR420 PixelFormats = PixelFormat420FullRange | PixelFormat420VideoRange
 )
 
 type OfferOptions struct {
 	Codecs              []Codec
-	FrameRate60         bool
 	DecoderMaxPixelRate int64
 	MaximumFrameRate    int
 	MaximumBitrate      int64
@@ -298,9 +296,6 @@ func Supports60FPS(decoderMaxPixelRate int64, width, height int) bool {
 func (o *Offer) requests60FPS() bool {
 	if o.options.MaximumFrameRate == 30 {
 		return false
-	}
-	if o.options.DecoderMaxPixelRate == 0 {
-		return o.options.FrameRate60
 	}
 	dimensions := o.decoderDimensions.Load()
 	return Supports60FPS(o.options.DecoderMaxPixelRate, int(dimensions>>32), int(dimensions&0xffffffff))

@@ -154,19 +154,17 @@ func OpenUSBMux(ctx context.Context, udid string) (*PairRecord, Dialer, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return record, func(ctx context.Context, port uint16) (net.Conn, error) {
-		return connectPort(ctx, device, port)
-	}, nil
+	return record, device.Dial, nil
 }
 
-func connectPort(ctx context.Context, device Device, port uint16) (net.Conn, error) {
+func (d Device) Dial(ctx context.Context, port uint16) (net.Conn, error) {
 	conn, err := dialUSBMux(ctx)
 	if err != nil {
 		return nil, err
 	}
 	reply, err := usbmuxRequest(ctx, conn, map[string]any{
 		"MessageType": "Connect",
-		"DeviceID":    device.DeviceID,
+		"DeviceID":    d.DeviceID,
 		// go-ios byte-swaps the port before encoding the usbmuxd Connect plist
 		// (go-ios ca2c56d, ios/connect.go:45; ios/utils.go:101-105).
 		"PortNumber": int(port>>8 | port<<8),

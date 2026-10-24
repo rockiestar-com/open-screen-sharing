@@ -12,7 +12,9 @@ import (
 	"time"
 
 	tun "github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
+	N "github.com/sagernet/sing/common/network"
 )
 
 const (
@@ -28,22 +30,25 @@ const (
 const udpQueueSize = 8 << 20
 
 type UDPConn struct {
-	tunnel *Tunnel
-	conn   *tun.GoUDPConn
-	port   uint16
-	queue  *datagramQueue
+	tunnel  *Tunnel
+	conn    *tun.GoUDPConn
+	port    uint16
+	options N.ReadWaitOptions
+	queue   *datagramQueue
 }
 
-func (t *Tunnel) ListenUDP(port uint16) (*UDPConn, error) {
+func (t *Tunnel) ListenUDP(port uint16, options N.ReadWaitOptions) (*UDPConn, error) {
 	conn, err := t.stack.ListenUDP(netip.AddrPortFrom(t.parameters.ClientAddress, port))
 	if err != nil {
 		return nil, err
 	}
+	conn.InitializeReadWaiter(options)
 	c := &UDPConn{
-		tunnel: t,
-		conn:   conn,
-		port:   uint16(conn.LocalAddr().(*net.UDPAddr).Port),
-		queue:  newDatagramQueue(udpQueueSize),
+		tunnel:  t,
+		conn:    conn,
+		port:    uint16(conn.LocalAddr().(*net.UDPAddr).Port),
+		options: options,
+		queue:   newDatagramQueue(),
 	}
 	t.udpAccess.Lock()
 	select {
@@ -60,13 +65,12 @@ func (t *Tunnel) ListenUDP(port uint16) (*UDPConn, error) {
 }
 
 func (c *UDPConn) receiveFromStack() {
-	buffer := make([]byte, 65536)
 	for {
-		n, source, err := c.conn.ReadFromUDPAddrPort(buffer)
+		buffer, source, err := c.conn.WaitReadPacket()
 		if err != nil {
 			return
 		}
-		c.queue.push(buffer[:n], source, time.Now())
+		c.queue.push(Datagram{Buffer: buffer, Source: source.AddrPort(), Arrived: time.Now()})
 	}
 }
 
@@ -74,17 +78,23 @@ func (c *UDPConn) Port() uint16 {
 	return c.port
 }
 
-func (c *UDPConn) ReadFrom(ctx context.Context, buffer []byte) (n int, source netip.AddrPort, arrived time.Time, err error) {
+type Datagram struct {
+	Buffer  *buf.Buffer
+	Source  netip.AddrPort
+	Arrived time.Time
+}
+
+func (c *UDPConn) ReadBatch(ctx context.Context, datagrams []Datagram) (int, error) {
 	for {
-		n, source, arrived, err = c.queue.pop(buffer)
+		n, err := c.queue.pop(datagrams)
 		if !errors.Is(err, errQueueEmpty) {
-			return n, source, arrived, err
+			return n, err
 		}
 		select {
 		case <-c.queue.ready:
 		case <-c.queue.closed:
 		case <-ctx.Done():
-			return 0, netip.AddrPort{}, time.Time{}, ctx.Err()
+			return 0, ctx.Err()
 		}
 	}
 }
@@ -127,8 +137,12 @@ func (t *Tunnel) deliverDirect(packet []byte, arrived time.Time) bool {
 	if length < udpHeaderLength || length > len(udp) {
 		return false
 	}
+	payload := udp[udpHeaderLength:length]
+	buffer := c.options.NewBufferSize(len(payload))
+	copy(buffer.Extend(len(payload)), payload)
+	c.options.PostReturn(buffer)
 	source := netip.AddrPortFrom(netip.AddrFrom16([16]byte(packet[8:24])).Unmap(), binary.BigEndian.Uint16(udp[0:]))
-	c.queue.push(udp[udpHeaderLength:length], source, arrived)
+	c.queue.push(Datagram{Buffer: buffer, Source: source, Arrived: arrived})
 	return true
 }
 
@@ -142,51 +156,38 @@ func (t *Tunnel) closeUDP(err error) {
 
 var errQueueEmpty = E.New("queue empty")
 
-const datagramHeaderLength = 2 + 16 + 2 + 8
-
 type datagramQueue struct {
-	access  sync.Mutex
-	buffer  []byte
-	head    int
-	used    int
-	epoch   time.Time
-	dropped uint64
-	err     error
-	ready   chan struct{}
-	closed  chan struct{}
+	access    sync.Mutex
+	datagrams []Datagram
+	head      int
+	size      int
+	dropped   uint64
+	err       error
+	ready     chan struct{}
+	closed    chan struct{}
 }
 
-func newDatagramQueue(size int) *datagramQueue {
+func newDatagramQueue() *datagramQueue {
 	return &datagramQueue{
-		buffer: make([]byte, size),
-		epoch:  time.Now(),
 		ready:  make(chan struct{}, 1),
 		closed: make(chan struct{}),
 	}
 }
 
-func (q *datagramQueue) push(datagram []byte, source netip.AddrPort, arrived time.Time) {
-	size := datagramHeaderLength + len(datagram)
+func (q *datagramQueue) push(datagram Datagram) {
+	size := datagram.Buffer.RawCap()
 	q.access.Lock()
-	if q.err != nil {
+	if q.err != nil || q.size+size > udpQueueSize {
+		if q.err == nil {
+			q.dropped++
+		}
 		q.access.Unlock()
+		datagram.Buffer.Release()
 		return
 	}
-	if q.used+size > len(q.buffer) {
-		q.dropped++
-		q.access.Unlock()
-		return
-	}
-	var header [datagramHeaderLength]byte
-	binary.BigEndian.PutUint16(header[0:], uint16(len(datagram)))
-	address := source.Addr().As16()
-	copy(header[2:], address[:])
-	binary.BigEndian.PutUint16(header[18:], source.Port())
-	binary.BigEndian.PutUint64(header[20:], uint64(arrived.Sub(q.epoch)))
-	at := q.put((q.head+q.used)%len(q.buffer), header[:])
-	q.put(at, datagram)
-	wasEmpty := q.used == 0
-	q.used += size
+	wasEmpty := q.head == len(q.datagrams)
+	q.datagrams = append(q.datagrams, datagram)
+	q.size += size
 	q.access.Unlock()
 	if wasEmpty {
 		select {
@@ -196,41 +197,27 @@ func (q *datagramQueue) push(datagram []byte, source netip.AddrPort, arrived tim
 	}
 }
 
-func (q *datagramQueue) pop(buffer []byte) (int, netip.AddrPort, time.Time, error) {
+func (q *datagramQueue) pop(datagrams []Datagram) (int, error) {
 	q.access.Lock()
 	defer q.access.Unlock()
 	if q.err != nil {
-		return 0, netip.AddrPort{}, time.Time{}, q.err
+		return 0, q.err
 	}
-	if q.used == 0 {
-		return 0, netip.AddrPort{}, time.Time{}, errQueueEmpty
+	n := copy(datagrams, q.datagrams[q.head:])
+	if n == 0 {
+		return 0, errQueueEmpty
 	}
-	var header [datagramHeaderLength]byte
-	at := q.get(q.head, header[:])
-	length := int(binary.BigEndian.Uint16(header[0:]))
-	n := min(length, len(buffer))
-	q.get(at, buffer[:n])
-	q.used -= datagramHeaderLength + length
-	if q.used == 0 {
+	for _, datagram := range datagrams[:n] {
+		q.size -= datagram.Buffer.RawCap()
+	}
+	q.head += n
+	if q.head >= len(q.datagrams)/2 {
+		remaining := copy(q.datagrams, q.datagrams[q.head:])
+		clear(q.datagrams[remaining:])
+		q.datagrams = q.datagrams[:remaining]
 		q.head = 0
-	} else {
-		q.head = (at + length) % len(q.buffer)
 	}
-	source := netip.AddrPortFrom(netip.AddrFrom16([16]byte(header[2:18])).Unmap(), binary.BigEndian.Uint16(header[18:]))
-	arrived := q.epoch.Add(time.Duration(binary.BigEndian.Uint64(header[20:])))
-	return n, source, arrived, nil
-}
-
-func (q *datagramQueue) put(at int, data []byte) int {
-	n := copy(q.buffer[at:], data)
-	copy(q.buffer, data[n:])
-	return (at + len(data)) % len(q.buffer)
-}
-
-func (q *datagramQueue) get(at int, data []byte) int {
-	n := copy(data, q.buffer[at:])
-	copy(data[n:], q.buffer)
-	return (at + len(data)) % len(q.buffer)
+	return n, nil
 }
 
 func (q *datagramQueue) close(err error) {
@@ -240,7 +227,10 @@ func (q *datagramQueue) close(err error) {
 		return
 	}
 	q.err = err
-	q.used = 0
+	for _, datagram := range q.datagrams[q.head:] {
+		datagram.Buffer.Release()
+	}
+	q.datagrams, q.head, q.size = nil, 0, 0
 	close(q.closed)
 }
 

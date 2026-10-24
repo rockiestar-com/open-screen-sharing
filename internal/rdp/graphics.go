@@ -208,17 +208,6 @@ func (g *graphics) attach(framebuffer *bgra.Image) error {
 	return nil
 }
 
-func (g *graphics) snapshot() *bgra.Image {
-	g.framebufferAccess.Lock()
-	defer g.framebufferAccess.Unlock()
-	if g.framebuffer == nil {
-		return nil
-	}
-	frame := bgra.New(g.framebuffer.Width, g.framebuffer.Height)
-	frame.Copy(image.Point{}, g.framebuffer, g.framebuffer.Bounds())
-	return frame
-}
-
 func (g *graphics) close() {
 	g.framebufferAccess.Lock()
 	g.framebuffer = nil

@@ -149,11 +149,6 @@ func CheckLogin(ctx context.Context, opts Options) error {
 	if err != nil {
 		return err
 	}
-	if opts.DialTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.DialTimeout)
-		defer cancel()
-	}
 	t, err := negotiateTransport(ctx, opts, nil)
 	if err != nil {
 		return err
@@ -165,11 +160,6 @@ func Dial(ctx context.Context, opts Options, events Events) (*Client, error) {
 	opts, err := normalizeOptions(opts)
 	if err != nil {
 		return nil, err
-	}
-	if opts.DialTimeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.DialTimeout)
-		defer cancel()
 	}
 	events.StateChanged(StateConnecting)
 	t, err := negotiateTransport(ctx, opts, func() { events.StateChanged(StateAuthenticating) })
@@ -441,10 +431,6 @@ func (c *Client) SetFramebuffer(buffer *bgra.Image) error {
 		return err
 	}
 	return c.RequestRefresh()
-}
-
-func (c *Client) Snapshot() *bgra.Image {
-	return c.graphics.snapshot()
 }
 
 func (c *Client) Info() Info {

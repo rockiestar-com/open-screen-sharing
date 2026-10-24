@@ -64,6 +64,27 @@ func ParsePairRecord(data []byte) (*PairRecord, error) {
 
 type Dialer func(ctx context.Context, port uint16) (net.Conn, error)
 
+func QueryValues(ctx context.Context, dial Dialer) (map[string]any, error) {
+	conn, err := dial(ctx, Port)
+	if err != nil {
+		return nil, E.Cause(err, "connect to lockdown")
+	}
+	defer conn.Close()
+	reply, err := rsd.NewPlistConn(conn).Request(ctx, map[string]any{
+		"Label":           progName,
+		"ProtocolVersion": "2",
+		"Request":         "GetValue",
+	})
+	if err != nil {
+		return nil, E.Cause(err, "lockdown GetValue")
+	}
+	if message, failed := reply["Error"]; failed {
+		return nil, E.New("lockdown GetValue: ", fmt.Sprint(message))
+	}
+	values, _ := reply["Value"].(map[string]any)
+	return values, nil
+}
+
 func DialCoreDeviceProxy(ctx context.Context, record *PairRecord, dial Dialer, logger *slog.Logger) (net.Conn, error) {
 	tlsConfig := &tls.Config{
 		Certificates:       []tls.Certificate{record.Certificate},

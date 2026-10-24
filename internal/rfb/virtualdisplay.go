@@ -88,7 +88,7 @@ func (c *Client) sendDisplayChangeLocked(message []byte, selection bool) error {
 	// does not, so even a configuration that changes nothing releases the media sender
 	// (ScreensharingAgent 756.36.5.2, macOS 27.0.1 26A434, UUID DA1CD9BA-97A1-3758-B425-00FA34B428A3,
 	// -[SSAgentVirtualDisplay updateDisplayInfo:dynamicResolution:updateDisplayModes:]
-	// 0x100003908..0x100003994; RE/26A434/ScreensharingAgent/virtual-rejection-round12-native.txt).
+	// 0x100003908..0x100003994).
 	if !selection && c.media != nil {
 		c.media.stream.ExpectRestart()
 	}
@@ -108,10 +108,4 @@ func (c *Client) releaseDisplayChangesLocked() error {
 		}
 	}
 	return nil
-}
-
-func (c *Client) HDR() bool {
-	c.access.Lock()
-	defer c.access.Unlock()
-	return c.hdr
 }

@@ -36,9 +36,7 @@ func (h *viewerHandler) HandleEvent(session *rfb.ServerSession, event rfb.Viewer
 	s := h.server()
 	switch event := event.(type) {
 	case rfb.ViewerPointer, rfb.ViewerKey, rfb.ViewerScroll, rfb.ViewerGesture, rfb.ViewerSystemCommand:
-		if !s.options.DisableInput {
-			s.input.post(session, event)
-		}
+		s.input.post(session, event)
 	case rfb.ViewerMode:
 		if event.Mode == rfb.ModeObserve {
 			s.input.sessionEnded(session)

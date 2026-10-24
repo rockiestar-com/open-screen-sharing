@@ -50,19 +50,6 @@ func (t SecurityType) String() string {
 	return "security(" + strconv.Itoa(int(t)) + ")"
 }
 
-func ParseSecurityType(value string) (SecurityType, error) {
-	number, err := strconv.Atoi(value)
-	if err == nil && number > 0 && number < 256 {
-		return SecurityType(number), nil
-	}
-	for securityType, name := range securityNames {
-		if strings.EqualFold(name, value) {
-			return securityType, nil
-		}
-	}
-	return 0, E.New("rfb: unknown security type ", strconv.Quote(value))
-}
-
 var (
 	SecurityAccount        = []SecurityType{SecurityAppleRSA, SecurityAppleSRP, SecurityAppleDH, SecurityKerberos}
 	SecurityAskPermission  = []SecurityType{SecurityAskControl, SecurityAskObserve}

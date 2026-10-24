@@ -95,19 +95,6 @@ func (c *Client) CancelRemoteDrag() error {
 	return c.CancelDrag(newDragID())
 }
 
-// ScreensharingAgent ignores a drag request when the Mac has no drag in progress, so nothing
-// answers it (ScreensharingAgent 756.36.5.2, macOS 27.0.1 26A434,
-// UUID DA1CD9BA-97A1-3758-B425-00FA34B428A3, sub_10001b1f0 0x10001b28c..0x10001b298,
-// 0x10001b334..0x10001b3a8).
-func (c *Client) RequestDrag() error {
-	err := c.checkDrag(0x0e)
-	if err != nil {
-		return err
-	}
-	message := []byte{0x0e, 0, 0, 0}
-	return c.send(binary.BigEndian.AppendUint32(message, newDragID()))
-}
-
 func newDragID() uint32 {
 	return rand.Uint32N(0x7fffffff) + 1
 }

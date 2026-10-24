@@ -2701,7 +2701,7 @@ nonisolated final class SessionEventSink: @unchecked Sendable {
                 guard let self, !self.isDetached else { return }
                 let timing = frame.timing
                 pipeline.setVideoFrame(frame) { [weak self] picture in
-                    self?.pictureReady(picture, arrival: timing.arrival, capture: timing.capture)
+                    self?.pictureReady(picture, arrival: timing.arrival, capture: timing.capture, composed: timing.composed)
                 }
             },
             failure: { [weak self] in self?.session?.requestKeyframe() },
@@ -2748,9 +2748,9 @@ nonisolated final class SessionEventSink: @unchecked Sendable {
         }
     }
 
-    private func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?) {
+    private func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?, composed: CFTimeInterval?) {
         guard debugInfo.isRunning.load(ordering: .relaxed) else { return }
-        onMain { $0.debugInfo.pictureReady(picture, arrival: arrival, capture: capture) }
+        onMain { $0.debugInfo.pictureReady(picture, arrival: arrival, capture: capture, composed: composed) }
     }
 
     func sessionPhaseChanged(_ phase: SessionPhase) {
@@ -2775,7 +2775,7 @@ nonisolated final class SessionEventSink: @unchecked Sendable {
         guard !isDetached else { return }
         do {
             if let picture = try pipeline.updateFramebuffer(dirtyRect) {
-                pictureReady(picture, arrival: arrival, capture: nil)
+                pictureReady(picture, arrival: arrival, capture: nil, composed: nil)
             }
         } catch {
             onMain { $0.drawingFailed(error) }

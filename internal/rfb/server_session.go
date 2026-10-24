@@ -96,16 +96,6 @@ func (s *ServerSession) RemoteAddr() net.Addr {
 	return s.conn.RemoteAddr()
 }
 
-func (s *ServerSession) MediaStats() (media.ServerStreamStats, bool) {
-	s.access.Lock()
-	stream := s.media
-	s.access.Unlock()
-	if stream == nil {
-		return media.ServerStreamStats{}, false
-	}
-	return stream.Stats(), true
-}
-
 func (s *ServerSession) Close() error {
 	s.cancel()
 	return s.conn.Close()
@@ -231,7 +221,7 @@ func (s *ServerSession) handshake() error {
 	s.screen = screen
 	s.framebuffer = [2]int{screen.Width, screen.Height}
 	s.logger.Debug("client init", "flags", fmt.Sprintf("%#x", clientInit), "version", version.String())
-	_, err = s.conn.Write(serverInitMessage(screen.Width, screen.Height, options.Flags, s.server.commands, options.Name))
+	_, err = s.conn.Write(serverInitMessage(screen.Width, screen.Height, options.Name))
 	return err
 }
 
@@ -311,7 +301,7 @@ func (s *ServerSession) prelude() ([][]byte, error) {
 		s.logger.Debug("set encryption", "command", command)
 		switch command {
 		case 1:
-			if !s.server.options.RekeyAfterEncryptionStart && !s.writerStarted {
+			if !s.writerStarted {
 				err = s.startWriter()
 			}
 		case 2:
@@ -453,7 +443,7 @@ func (s *ServerSession) layoutLocked(screen ServerScreen) []serverRectangle {
 		rectangles = append(rectangles, newRectangle(0, 0, framebuffer[0], framebuffer[1], EncodingDesktopSize, nil))
 	}
 	if slices.Contains(s.encodings, EncodingDisplayLayout) {
-		rectangles = append(rectangles, displayLayoutRectangle(screen, s.viewerScale, s.server.options.DisplayFlags))
+		rectangles = append(rectangles, displayLayoutRectangle(screen, s.viewerScale))
 	}
 	s.screen = screen
 	s.framebuffer = framebuffer
@@ -481,10 +471,7 @@ func (s *ServerSession) setScale(scale float64) {
 
 func (s *ServerSession) deviceLocked(screen ServerScreen) []serverRectangle {
 	var rectangles []serverRectangle
-	model := s.server.options.DeviceModel
-	if model == "" {
-		model = screen.Model
-	}
+	model := screen.Model
 	switch {
 	case !slices.Contains(s.encodings, EncodingDeviceInfo):
 		s.modelSent = ""

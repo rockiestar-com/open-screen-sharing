@@ -34,8 +34,7 @@ func (s *Server) LockScreen() error {
 // back off, as a second power-button event would.
 func (s *Server) WakeScreen() error {
 	button := hid.ButtonHome
-	// Back-to-back down/up woke ActiveOn from AOD on iPhone18,2 / 24B5110a
-	// (RE/24B5110a/dtuhidd/unlock-timing-20261017/buttons-zero.jsonl).
+	// Back-to-back down/up woke ActiveOn from AOD on iPhone18,2 / 24B5110a.
 	button.Hold = 0
 	return s.pressButton(button, 1)
 }

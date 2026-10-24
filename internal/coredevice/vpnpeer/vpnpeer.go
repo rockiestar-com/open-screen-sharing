@@ -88,9 +88,40 @@ func Find(ctx context.Context, port uint16) (Peer, error) {
 	for range addresses {
 		answer := <-results
 		if answer.err == nil {
-			return Peer{Address: addresses[answer.index], LocalNetwork: onLocalNetwork(answer.local)}, nil
+			address := addresses[answer.index]
+			return Peer{Address: address, LocalNetwork: onLocalNetwork(answer.local) || loopsThroughLocalNetwork(ctx, address)}, nil
 		}
 		errs[answer.index] = answer.err
 	}
 	return Peer{}, E.Cause(E.Errors(errs...), "none of the VPN addresses ", strings.Join(F.MapToString(addresses), ", "), " answers on port ", port)
+}
+
+func loopsThroughLocalNetwork(ctx context.Context, address netip.Addr) bool {
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(ctx, "tcp", ":0")
+	if err != nil {
+		return false
+	}
+	defer listener.Close()
+	accepted := make(chan netip.Addr, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- M.AddrPortFromNet(conn.LocalAddr()).Addr().Unmap()
+		_ = conn.Close()
+	}()
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", netip.AddrPortFrom(address, M.AddrPortFromNet(listener.Addr()).Port()).String())
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	select {
+	case local := <-accepted:
+		return onLocalNetwork(local)
+	case <-ctx.Done():
+		return false
+	}
 }

@@ -51,6 +51,7 @@ nonisolated final class MicrophoneSender: @unchecked Sendable {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
+        engine.stopForRelease()
     }
 
     func start() {
@@ -102,7 +103,10 @@ nonisolated final class MicrophoneSender: @unchecked Sendable {
 
     private func restart() {
         queue.async { [self] in
-            guard running, !engine.isRunning else { return }
+            guard running else { return }
+            // AVAudioEngineConfigurationChange can arrive while the engine still reports running, although its documentation
+            // says the engine stops itself first (iOS 26.4.2, https://developer.apple.com/forums/thread/825253).
+            engine.stop()
             engine.inputNode.removeTap(onBus: 0)
             do {
                 #if os(iOS)

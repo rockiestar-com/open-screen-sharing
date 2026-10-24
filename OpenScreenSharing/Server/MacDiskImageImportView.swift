@@ -42,7 +42,7 @@ struct MacDiskImageImportView: View {
 
     var body: some View {
         WithPerceptionTracking {
-            Form {
+            SheetForm(Text("Import from Mac")) {
                 Section {
                     LabeledContentCompat("Host") {
                         TextField("Host", text: $host, prompt: Text("Required"))
@@ -111,8 +111,6 @@ struct MacDiskImageImportView: View {
                 }
                 .disabled(store.isImporting)
             }
-            .navigationTitle("Import from Mac")
-            .navigationBarTitleDisplayMode(.inline)
             .navigationBarBackButtonHidden(store.isImporting)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

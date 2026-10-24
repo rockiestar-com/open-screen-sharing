@@ -123,7 +123,9 @@ type VideoAccessUnit struct {
 
 	Turns int32
 
-	HoldNanoseconds int64
+	HoldNanoseconds    int64
+	Composed           bool
+	ComposeNanoseconds int64
 }
 
 type AudioFormat struct {
@@ -276,19 +278,25 @@ func (e *mediaEvents) VideoAccessUnit(unit media.VideoAccessUnit) {
 	if !unit.CompletedAt.IsZero() {
 		hold = max(time.Since(unit.CompletedAt), 0)
 	}
+	var composed time.Duration
+	if !unit.ComposedAt.IsZero() {
+		composed = time.Since(unit.ComposedAt)
+	}
 	e.session.handler.OnVideoAccessUnit(&VideoAccessUnit{
-		Data:            unit.Data,
-		Timestamp:       unit.Timestamp,
-		ClockRate:       int32(unit.ClockRate),
-		Sync:            unit.Sync,
-		Band:            int32(unit.Band),
-		Bands:           int32(unit.Bands),
-		FrameID:         unit.FrameID,
-		FrameEnd:        unit.FrameEnd,
-		ChangedBands:    int32(unit.ChangedBands),
-		Discontinuity:   unit.Discontinuity,
-		Turns:           int32(unit.Turns),
-		HoldNanoseconds: int64(hold),
+		Data:               unit.Data,
+		Timestamp:          unit.Timestamp,
+		ClockRate:          int32(unit.ClockRate),
+		Sync:               unit.Sync,
+		Band:               int32(unit.Band),
+		Bands:              int32(unit.Bands),
+		FrameID:            unit.FrameID,
+		FrameEnd:           unit.FrameEnd,
+		ChangedBands:       int32(unit.ChangedBands),
+		Discontinuity:      unit.Discontinuity,
+		Turns:              int32(unit.Turns),
+		HoldNanoseconds:    int64(hold),
+		Composed:           !unit.ComposedAt.IsZero(),
+		ComposeNanoseconds: int64(composed),
 	})
 }
 

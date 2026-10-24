@@ -10,7 +10,11 @@ final class DebugInfoMonitor {
         var shownPerSecond: Double?
         var bitsPerSecond: Double?
         var encoding: String?
+        /// One-way network estimate (half RTT plus video queuing delay), used by the latency breakdown.
         var networkMilliseconds: Double
+        /// Full round trip plus video queuing delay, used by the input response breakdown.
+        var roundTripMilliseconds: Double
+        var remoteMilliseconds: Double?
         var deviceMilliseconds: Double?
         var lossy: Bool
         var loss: Double?
@@ -34,6 +38,7 @@ final class DebugInfoMonitor {
         var picture: Int
         var arrival: CFTimeInterval
         var capture: CFTimeInterval?
+        var composed: CFTimeInterval?
     }
 
     private struct Shown {
@@ -57,7 +62,6 @@ final class DebugInfoMonitor {
 
     private(set) var figures: Figures?
     private(set) var timeline: [Span] = []
-    private(set) var response: Response?
 
     var stutters: Int { timeline.reduce(0) { $0 + $1.stutters } }
 
@@ -71,8 +75,10 @@ final class DebugInfoMonitor {
     @PerceptionIgnored private var ready = 0
     @PerceptionIgnored private var shown = 0
     @PerceptionIgnored private var delays: [TimeInterval] = []
+    @PerceptionIgnored private var remoteDelays: [TimeInterval] = []
     @PerceptionIgnored private var lateness: TimeInterval?
     @PerceptionIgnored private var hitches = 0
+    @PerceptionIgnored private var remoteMilliseconds: Double?
     @PerceptionIgnored private var deviceMilliseconds: Double?
     @PerceptionIgnored private var windowStart: CFTimeInterval = 0
     @PerceptionIgnored private var previous: SessionStatistics?
@@ -96,8 +102,10 @@ final class DebugInfoMonitor {
         ready = 0
         shown = 0
         delays = []
+        remoteDelays = []
         lateness = nil
         hitches = 0
+        remoteMilliseconds = nil
         deviceMilliseconds = nil
         previous = nil
         input = nil
@@ -113,13 +121,14 @@ final class DebugInfoMonitor {
     }
 
     func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?) {
+    func pictureReady(_ picture: Int, arrival: CFTimeInterval, capture: CFTimeInterval?, composed: CFTimeInterval?) {
         guard isRunning.load(ordering: .relaxed) else { return }
         if let lastPicture, picture <= lastPicture { return }
         ready += 1
         if waiting.count == Self.maxWaiting {
             waiting.removeFirst()
         }
-        waiting.append(Ready(picture: picture, arrival: arrival, capture: capture))
+        waiting.append(Ready(picture: picture, arrival: arrival, capture: capture, composed: composed))
         if let input, input.picture == nil {
             self.input =
                 arrival > input.sentAt && arrival - input.sentAt < Self.responseTimeout
@@ -144,7 +153,7 @@ final class DebugInfoMonitor {
         shown += 1
         if let input, let responsePicture = input.picture, picture >= responsePicture {
             self.input = nil
-            if let network = figures?.networkMilliseconds {
+            if let network = figures?.roundTripMilliseconds {
                 responses.append(Response(total: time - input.sentAt, network: network / 1000, device: max(time - input.arrival, 0)))
                 if responses.count > Self.responseSamples {
                     responses.removeFirst()
@@ -162,6 +171,9 @@ final class DebugInfoMonitor {
             }
             let delay = max(time - waited.arrival, 0)
             delays.append(delay)
+            if let composed = waited.composed {
+                remoteDelays.append(max(waited.arrival - composed, 0))
+            }
             late = max(late, delay)
             newest = waited
         }
@@ -189,6 +201,7 @@ final class DebugInfoMonitor {
             ready = 0
             shown = 0
             delays.removeAll(keepingCapacity: true)
+            remoteDelays.removeAll(keepingCapacity: true)
             lateness = nil
             hitches = 0
         }
@@ -220,12 +233,18 @@ final class DebugInfoMonitor {
         if !delays.isEmpty {
             deviceMilliseconds = delays.reduce(0, +) / Double(delays.count) * 1000
         }
+        if !remoteDelays.isEmpty {
+            remoteMilliseconds = remoteDelays.reduce(0, +) / Double(remoteDelays.count) * 1000
+        }
+        let queuing = statistics.video?.queuingDelayMilliseconds ?? 0
         figures = Figures(
             readyPerSecond: measured ? Double(ready) / elapsed : nil,
             shownPerSecond: measured ? Double(shown) / elapsed : nil,
             bitsPerSecond: bitsPerSecond,
             encoding: statistics.encoding,
-            networkMilliseconds: statistics.roundTripMilliseconds + (statistics.video?.queuingDelayMilliseconds ?? 0),
+            networkMilliseconds: statistics.roundTripMilliseconds / 2 + queuing,
+            roundTripMilliseconds: statistics.roundTripMilliseconds + queuing,
+            remoteMilliseconds: remoteMilliseconds,
             deviceMilliseconds: deviceMilliseconds,
             lossy: statistics.packets != nil,
             loss: loss

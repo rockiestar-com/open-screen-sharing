@@ -85,8 +85,7 @@ func (c *Client) PrepareTouches(ctx context.Context) error {
 	return nil
 }
 
-// Zero-hold taps reached the passcode page on iPhone18,2 / iOS 27.2 24B5110a
-// (RE/24B5110a/ScreenSharing/faceid-timing-20261017/review.json).
+// Zero-hold taps reached the passcode page on iPhone18,2 / iOS 27.2 24B5110a.
 func (c *Client) Tap(ctx context.Context, touch Touch) error {
 	if err := ctx.Err(); err != nil {
 		return err

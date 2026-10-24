@@ -9,8 +9,9 @@ require (
 	github.com/nwaples/rardecode/v2 v2.4.5
 	github.com/sagernet/asc-go v0.0.0-20260914163356-9e3d45a797c1
 	github.com/sagernet/gomobile v0.1.13
-	github.com/sagernet/sing v0.9.5-0.20260917142815-f37989cadbf0
+	github.com/sagernet/sing v0.9.7-0.20261023072922-1b1a0ff12a68
 	github.com/sagernet/sing-tun v0.9.7-0.20261002083955-3f8acd9da65b
+	github.com/spf13/cobra v1.10.2
 	github.com/ulikunitz/xz v0.5.17
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.46.0
@@ -32,6 +33,7 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
+	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.27 // indirect
@@ -40,6 +42,7 @@ require (
 	github.com/sagernet/netlink v0.0.0-20260814022025-64455d367bbf // indirect
 	github.com/sagernet/nftables v0.3.0-mod.4 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stangelandcl/ppmd v0.1.1 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect

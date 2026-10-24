@@ -105,6 +105,7 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
+        engine.stopForRelease()
     }
 
     func start() {
@@ -149,7 +150,10 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
 
     private func restart() {
         queue.async { [self] in
-            guard started, !engine.isRunning else { return }
+            guard started else { return }
+            // AVAudioEngineConfigurationChange can arrive while the engine still reports running, although its documentation
+            // says the engine stops itself first (iOS 26.4.2, https://developer.apple.com/forums/thread/825253).
+            engine.stop()
             started = false
             ring.flushRequested.store(true, ordering: .relaxed)
             play()
@@ -533,6 +537,21 @@ nonisolated final class AudioOutput: @unchecked Sendable {
         guard start < end else { return }
         for buffer in list {
             buffer.mData?.assumingMemoryBound(to: Float.self).advanced(by: start).update(repeating: 0, count: end - start)
+        }
+    }
+}
+
+nonisolated extension AVAudioEngine {
+    // -[AVAudioEngine dealloc] stops the engine, then raises "required condition is false: false == isEngineRunning" from
+    // AUGraphNodeIOV3's destructor if it still reports running, which terminates the process (AVFAudio, macOS 27.0.1 26A434,
+    // UUID 72811002-C95F-3F3D-B4A6-5A2AA781EBB0, -[AVAudioEngine dealloc] 0x21baa0918..0x21baa0968,
+    // AUGraphNodeIOV3::DeallocateInputBlock() 0x21b9eccfc..0x21b9eced0). On that build stop always clears the running state
+    // (AVAudioEngineGraph::_Stop 0x21ba7c020..0x21ba7c09c), but the crash was observed on macOS 26.5.2 25F84 9 seconds after wake.
+    func stopForRelease() {
+        stop()
+        guard isRunning else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { [self] in
+            stopForRelease()
         }
     }
 }

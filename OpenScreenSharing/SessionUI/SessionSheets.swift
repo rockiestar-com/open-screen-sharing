@@ -49,7 +49,7 @@ struct CredentialsView: View {
     var body: some View {
         NavigationStackCompat {
             ScrollViewReader { scroller in
-                Form {
+                SheetForm(Text(verbatim: computerName)) {
                     Section {
                         if asksForUsername {
                             TextField("User Name", text: $username)
@@ -84,11 +84,7 @@ struct CredentialsView: View {
                         }
                     }
                 }
-                .navigationTitle(computerName)
-                #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-                #else
-                .formStyle(.grouped)
+                #if os(macOS)
                 .frame(width: 420)
                 .fixedSize(horizontal: false, vertical: true)
                 #endif

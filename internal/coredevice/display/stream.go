@@ -11,6 +11,7 @@ import (
 
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice/tunnel"
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice/xpc"
+	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
@@ -23,7 +24,7 @@ type Stream struct {
 	control  *xpc.Conn
 	deviceIP netip.Addr
 
-	arrival time.Time
+	datagrams []tunnel.Datagram
 
 	keyFrameAccess sync.Mutex
 	lastKeyFrame   time.Time
@@ -106,37 +107,50 @@ func (s *Stream) end(err error) {
 	})
 }
 
-func (s *Stream) ReadPacket(ctx context.Context, buffer []byte) (n int, rtcp bool, err error) {
+type Packet struct {
+	Buffer  *buf.Buffer
+	RTCP    bool
+	Arrival time.Time
+}
+
+func (s *Stream) ReadPackets(ctx context.Context, packets []Packet) (int, error) {
+	if len(s.datagrams) < len(packets) {
+		s.datagrams = make([]tunnel.Datagram, len(packets))
+	}
 	for {
-		if err = context.Cause(ctx); err != nil {
-			return 0, false, err
+		if err := context.Cause(ctx); err != nil {
+			return 0, err
 		}
 		select {
 		case <-s.done:
-			return 0, false, s.endErr
+			return 0, s.endErr
 		default:
 		}
-		n, from, arrived, err := s.conn.ReadFrom(ctx, buffer)
+		n, err := s.conn.ReadBatch(ctx, s.datagrams[:len(packets)])
 		if err != nil {
 			if cause := context.Cause(ctx); cause != nil {
-				return 0, false, cause
+				return 0, cause
 			}
 			select {
 			case <-s.done:
-				return 0, false, s.endErr
+				return 0, s.endErr
 			default:
 			}
-			return 0, false, err
+			return 0, err
 		}
-		if from.Addr() == s.deviceIP {
-			s.arrival = arrived
-			return n, isRTCP(buffer[:n]), nil
+		count := 0
+		for _, datagram := range s.datagrams[:n] {
+			if datagram.Source.Addr() != s.deviceIP {
+				datagram.Buffer.Release()
+				continue
+			}
+			packets[count] = Packet{Buffer: datagram.Buffer, RTCP: isRTCP(datagram.Buffer.Bytes()), Arrival: datagram.Arrived}
+			count++
+		}
+		if count > 0 {
+			return count, nil
 		}
 	}
-}
-
-func (s *Stream) Arrival() time.Time {
-	return s.arrival
 }
 
 func (s *Stream) WriteRTCP(packet []byte) error {

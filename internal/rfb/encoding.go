@@ -2,9 +2,6 @@ package rfb
 
 import (
 	"fmt"
-	"strconv"
-
-	E "github.com/sagernet/sing/common/exceptions"
 )
 
 type Encoding int32
@@ -81,15 +78,6 @@ func (e Encoding) carriesPixels() bool {
 	default:
 		return false
 	}
-}
-
-func ParseEncoding(name string) (Encoding, error) {
-	for encoding, encodingName := range encodingNames {
-		if encodingName == name {
-			return encoding, nil
-		}
-	}
-	return 0, E.New("rfb: unknown encoding ", strconv.Quote(name))
 }
 
 var appleMetadataEncodings = []Encoding{

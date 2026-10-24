@@ -79,7 +79,7 @@ func (s *Server) prepareDiskImage(ctx context.Context, device *coredevice.Device
 		s.logger.Warn("mount the Developer Disk Image", "variant", variant, "error", err)
 		failure = E.Errors(failure, E.Cause(err, "mount ", variant))
 	}
-	if !found && !s.options.DownloadDiskImage {
+	if !found {
 		if !hasCopy {
 			return newError(ProblemNoDiskImage, "the Developer Disk Image is not mounted, and there is no copy of it to mount")
 		}
@@ -103,22 +103,5 @@ func (s *Server) diskImageFiles(ctx context.Context, directory string, variant i
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if !s.options.DownloadDiskImage {
-		return "", E.Cause(err, "verify ", variant)
-	}
-	source, err := imagemounter.HTTPSource(imagemounter.RepositoryURL(variant))
-	if err != nil {
-		return "", err
-	}
-	s.logger.Info("downloading the Developer Disk Image", "variant", variant, "directory", own)
-	err = imagemounter.Import(ctx, source, directory, func(received, _ int64) {
-		s.notify(func(observer Observer) { observer.DiskImageProgress(received) })
-	})
-	if err != nil {
-		return "", E.Cause(err, "download ", variant)
-	}
-	if err = imagemounter.Verify(ctx, own, variant); err != nil {
-		return "", E.Cause(err, "download ", variant)
-	}
-	return own, nil
+	return "", E.Cause(err, "verify ", variant)
 }

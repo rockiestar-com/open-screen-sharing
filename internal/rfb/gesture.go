@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"slices"
-	"strconv"
 	"time"
 
 	E "github.com/sagernet/sing/common/exceptions"
@@ -65,15 +64,6 @@ func (s SystemCommand) String() string {
 	}
 }
 
-func ParseSystemCommand(name string) (SystemCommand, error) {
-	for command := SystemCommandLaunchpad; command <= SystemCommandAppWindows; command++ {
-		if command.String() == name {
-			return command, nil
-		}
-	}
-	return 0, E.New("rfb: unknown system command ", strconv.Quote(name))
-}
-
 const (
 	eventGestureStart        = 1
 	eventGestureEnd          = 2
@@ -130,27 +120,6 @@ func amountMessage(subtype uint16, amount float64, x, y int, phase GesturePhase,
 	body = binary.BigEndian.AppendUint64(body, uint64(phase))
 	body = binary.BigEndian.AppendUint64(body, mask)
 	return eventMessage(2, subtype, body)
-}
-
-func swipeMessage(direction SwipeDirection, x, y int) []byte {
-	motion, progress := uint32(1), float32(1)
-	switch direction {
-	case SwipeForward:
-		progress = -1
-	case SwipeUp:
-		motion, progress = 2, -1
-	case SwipeDown:
-		motion = 2
-	}
-	body := binary.BigEndian.AppendUint32(nil, motion)
-	body = binary.BigEndian.AppendUint32(body, 0)
-	body = binary.BigEndian.AppendUint32(body, math.Float32bits(progress))
-	for range 5 {
-		body = binary.BigEndian.AppendUint32(body, 0)
-	}
-	body = binary.BigEndian.AppendUint32(body, 0)
-	body = binary.BigEndian.AppendUint32(body, 0)
-	return eventMessage(1, eventGestureSwipe, appendPosition(body, x, y))
 }
 
 func gestureScrollMessage(deltaX, deltaY float64, phase GesturePhase, x, y int) []byte {
@@ -214,34 +183,6 @@ func (c *Client) SendMagnify(x, y int, magnification float64, phase GesturePhase
 
 func (c *Client) SendRotate(x, y int, degrees float64, phase GesturePhase) error {
 	return c.sendSeriesGesture(gestureRotate, eventGestureRotate, degrees, x, y, phase, 0)
-}
-
-func (c *Client) sendPointGesture(subtype uint16, x, y int) error {
-	c.access.Lock()
-	wireX, wireY, err := c.gestureTargetLocked(x, y)
-	c.access.Unlock()
-	if err != nil {
-		return err
-	}
-	return c.sendInput(eventMessage(1, subtype, appendPosition(nil, wireX, wireY)), false)
-}
-
-func (c *Client) SendSmartMagnify(x, y int) error {
-	return c.sendPointGesture(eventGestureSmartMagnify, x, y)
-}
-
-func (c *Client) SendLookup(x, y int) error {
-	return c.sendPointGesture(eventGestureLookup, x, y)
-}
-
-func (c *Client) SendSwipe(x, y int, direction SwipeDirection) error {
-	c.access.Lock()
-	wireX, wireY, err := c.gestureTargetLocked(x, y)
-	c.access.Unlock()
-	if err != nil {
-		return err
-	}
-	return c.sendInput(swipeMessage(direction, wireX, wireY), false)
 }
 
 func (c *Client) SendScrollPhase(x, y int, deltaX, deltaY float64, phase GesturePhase) error {

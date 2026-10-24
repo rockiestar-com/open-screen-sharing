@@ -50,7 +50,6 @@ func main() {
 		"-macosversion", macOSVersion,
 		"-trimpath",
 		"-buildvcs=false",
-		"-tags", "badlinkname",
 		"-ldflags", "-s -w -buildid= -checklinkname=0",
 		"-o", outputPath,
 		"./libsharing",

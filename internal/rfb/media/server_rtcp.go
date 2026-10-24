@@ -1,7 +1,6 @@
 package media
 
 import (
-	"bytes"
 	"encoding/binary"
 	"time"
 
@@ -11,11 +10,7 @@ import (
 const (
 	rtcpSourceDescription = 202
 	rtcpPayloadFeedback   = 206
-
-	sliceTrailerMinimumFragment = 1
 )
-
-var displayServiceTrailer = []byte{0x04, 0xf0, 0x0a, 0xc0, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0xec, 0x0a, 0xb0, 0x03}
 
 func rewriteExtensionProfile(packet []byte) {
 	if packet[0]&0x10 == 0 {
@@ -26,32 +21,6 @@ func rewriteExtensionProfile(packet []byte) {
 	if profile&appleExtensionMask == appleExtensionProfile {
 		binary.BigEndian.PutUint16(packet[offset:], macExtensionProfile(profile))
 	}
-}
-
-func stripSliceTrailer(packet []byte, payloadOffset int) []byte {
-	if packet[0]&0x20 != 0 {
-		return packet
-	}
-	payload := packet[payloadOffset:]
-	if len(payload) < 3 {
-		return packet
-	}
-	nalType := hevcNALType(payload)
-	header := 2
-	switch {
-	case nalType == hevcNALFragment:
-		if payload[2]&0x40 == 0 || int(payload[2]&0x3f) >= 32 {
-			return packet
-		}
-		header = 3
-	case nalType < 32:
-	default:
-		return packet
-	}
-	if len(payload) < header+sliceTrailerMinimumFragment+len(displayServiceTrailer) || !bytes.HasSuffix(payload, displayServiceTrailer) {
-		return packet
-	}
-	return packet[:len(packet)-len(displayServiceTrailer)]
 }
 
 func senderReport(ssrc uint32, ntp uint64, timestamp uint32, packets, octets uint32) []byte {

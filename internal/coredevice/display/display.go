@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice"
 	E "github.com/sagernet/sing/common/exceptions"
+	N "github.com/sagernet/sing/common/network"
 )
 
 const (
@@ -130,6 +131,7 @@ type StreamOptions struct {
 	MaximumBitrate uint64
 	TilesPerFrame  int
 	PixelFormats   uint32
+	ReadOptions    N.ReadWaitOptions
 }
 
 func (c *Client) StartVideo(ctx context.Context, options StreamOptions) (*Stream, error) {
@@ -175,7 +177,7 @@ func (c *Client) start(ctx context.Context, streamType StreamType, options Strea
 	for options.SSRC == 0 {
 		options.SSRC = rand.Uint32()
 	}
-	conn, err := c.device.ListenUDP(0)
+	conn, err := c.device.ListenUDP(0, options.ReadOptions)
 	if err != nil {
 		return nil, E.Cause(err, "start ", string(streamType), ": bind receiver")
 	}

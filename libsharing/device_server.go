@@ -53,7 +53,6 @@ type DeviceServerHandler interface {
 	OnStateChanged(state int32, errorCode int32, message string)
 	OnViewerConnected(viewerID int64)
 	OnViewerDisconnected(viewerID int64)
-	OnAutoUnlockFailed(message string, inputStarted bool)
 	BacklightState() int32
 }
 
@@ -161,8 +160,6 @@ func NewDeviceServer(options *DeviceServerOptions, handler DeviceServerHandler) 
 				AudioPort: uint16(options.Port + 2),
 			},
 		},
-		Audio:                  true,
-		SharedClipboard:        true,
 		DiskImageDirectory:     options.DiskImageDirectory,
 		AutoUnlockPasscode:     options.AutoUnlockPasscode,
 		AutoUnlockPasscodeType: deviceserver.PasscodeType(options.AutoUnlockPasscodeType),
@@ -194,10 +191,6 @@ func (s *DeviceServer) SetRemotePairingPort(port int32) {
 	if s.setPairingPort(port) {
 		s.server.Retry()
 	}
-}
-
-func (s *DeviceServer) DisableAutoUnlock() {
-	s.server.DisableAutoUnlock()
 }
 
 func (s *DeviceServer) setPairingPort(port int32) bool {
@@ -237,8 +230,6 @@ func (o *deviceObserver) StateChanged(state deviceserver.State, err error) {
 
 func (o *deviceObserver) DeviceConnected(info coredevice.DeviceInfo) {}
 
-func (o *deviceObserver) DiskImageProgress(received int64) {}
-
 func (o *deviceObserver) ViewerConnected(session *rfb.ServerSession) {
 	o.handler.OnViewerConnected(int64(session.ID()))
 }
@@ -248,10 +239,6 @@ func (o *deviceObserver) ViewerDisconnected(session *rfb.ServerSession, err erro
 }
 
 func (o *deviceObserver) StreamingChanged(active bool) {}
-
-func (o *deviceObserver) AutoUnlockFailed(err error, inputStarted bool) {
-	o.handler.OnAutoUnlockFailed(err.Error(), inputStarted)
-}
 
 func stateCode(state deviceserver.State) int32 {
 	switch state {

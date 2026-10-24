@@ -10,6 +10,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	E "github.com/sagernet/sing/common/exceptions"
 )
@@ -61,6 +62,8 @@ const (
 const maxQueued = 32 << 20
 
 const retainedFrameSize = 64 << 10
+
+const sendStallTimeout = 5 * time.Second
 
 type Conn struct {
 	conn          net.Conn
@@ -408,6 +411,13 @@ func (c *Conn) writeData(ctx context.Context, id uint32, data []byte, endStream 
 func (c *Conn) reserve(ctx context.Context, id uint32, want int) (int, error) {
 	c.access.Lock()
 	defer c.access.Unlock()
+	var stallTimer *time.Timer
+	var stalledAt time.Time
+	defer func() {
+		if stallTimer != nil {
+			stallTimer.Stop()
+		}
+	}()
 	for {
 		if c.err != nil {
 			return 0, c.err
@@ -427,6 +437,16 @@ func (c *Conn) reserve(ctx context.Context, id uint32, want int) (int, error) {
 			s.sendWindow -= n
 			c.sendWindow -= n
 			return int(n), nil
+		}
+		if stallTimer == nil {
+			stalledAt = time.Now()
+			stallTimer = time.AfterFunc(sendStallTimeout, func() {
+				c.access.Lock()
+				c.changed.Broadcast()
+				c.access.Unlock()
+			})
+		} else if time.Since(stalledAt) >= sendStallTimeout {
+			return 0, E.New("xpc: the service accepted no data for ", sendStallTimeout)
 		}
 		c.changed.Wait()
 	}

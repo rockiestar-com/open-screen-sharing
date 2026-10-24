@@ -13,10 +13,14 @@ struct DebugInfoView: View {
     private static let dropWarning = 1.0
     private static let responseWarning = 100.0
     private static let responseSevere = 200.0
+    private static let latencyWarning = 100.0
+    private static let latencySevere = 200.0
     private static let remoteWarning = 50.0
     private static let remoteSevere = 100.0
-    private static let networkWarning = 50.0
-    private static let networkSevere = 100.0
+    private static let networkWarning = 25.0
+    private static let networkSevere = 50.0
+    private static let roundTripWarning = 50.0
+    private static let roundTripSevere = 100.0
     private static let deviceWarning = 2000.0 / 60
     private static let deviceSevere = DebugInfoMonitor.stutter * 1000
     private static let lossWarning = 0.01
@@ -51,37 +55,62 @@ struct DebugInfoView: View {
             let monitor = controller.debugInfo
             let figures = monitor.figures
             let response = monitor.response
-            let network = response.map { $0.network * 1000 } ?? figures?.networkMilliseconds
-            let device = response.map { $0.device * 1000 } ?? figures?.deviceMilliseconds
+            let network = figures?.networkMilliseconds
+            let remote = figures?.remoteMilliseconds
+            let device = figures?.deviceMilliseconds
+            let latency = network.flatMap { network in remote.flatMap { remote in device.map { remote + network + $0 } } }
+            let roundTrip = response.map { $0.network * 1000 } ?? figures?.roundTripMilliseconds
+            let responseDevice = response.map { $0.device * 1000 } ?? device
             let stutters = monitor.stutters
             let dialect = controller.info.dialect
             let isVideo = controller.isVideo
+            let breaksDown = controller.usesHighPerformance
             VStack(spacing: 0) {
                 pair {
                     Text(verbatim: dialect == .rdp ? "RDP" : isVideo ? "High Performance" : dialect == .apple ? "Standard" : "VNC")
                         .foregroundStyle(dialect != .apple ? Color.white : isVideo ? .green : .orange)
                 } trailing: {
+                    Text(verbatim: (isVideo ? controller.info.videoCodec : figures?.encoding) ?? "—")
+                }
+                pair {
+                    Text(verbatim: imageSize)
+                } trailing: {
                     Text(verbatim: figures?.shownPerSecond.map { String(format: "%.0f fps", $0) } ?? "—")
                         .foregroundStyle(dropsFrames(figures) ? Color.orange : .white)
                 }
-                pair {
-                    Text(verbatim: (isVideo ? controller.info.videoCodec : figures?.encoding) ?? "—")
-                } trailing: {
-                    Text(verbatim: imageSize)
-                }
                 VStack(spacing: 0) {
-                    row(
-                        "Response", response.map { Self.milliseconds($0.total * 1000) },
-                        color: Self.color(response.map { $0.total * 1000 }, warning: Self.responseWarning, severe: Self.responseSevere))
-                    row(
-                        "  Network", network.map(Self.milliseconds),
-                        color: Self.color(network, warning: Self.networkWarning, severe: Self.networkSevere))
-                    row(
-                        "  " + remoteName, response.map { Self.milliseconds($0.remote * 1000) },
-                        color: Self.color(response.map { $0.remote * 1000 }, warning: Self.remoteWarning, severe: Self.remoteSevere))
-                    row(
-                        "  " + Self.deviceName, device.map(Self.milliseconds),
-                        color: Self.color(device, warning: Self.deviceWarning, severe: Self.deviceSevere))
+                    if breaksDown {
+                        // Frame latency: remote compose -> network -> local presentation.
+                        row(
+                            "Latency", latency.map(Self.milliseconds),
+                            color: Self.color(latency, warning: Self.latencyWarning, severe: Self.latencySevere))
+                        row(
+                            "  " + remoteName, remote.map(Self.milliseconds),
+                            color: Self.color(remote, warning: Self.remoteWarning, severe: Self.remoteSevere))
+                        row(
+                            "  Network", network.map(Self.milliseconds),
+                            color: Self.color(network, warning: Self.networkWarning, severe: Self.networkSevere))
+                        row(
+                            "  " + Self.deviceName, device.map(Self.milliseconds),
+                            color: Self.color(device, warning: Self.deviceWarning, severe: Self.deviceSevere))
+                        row(
+                            "Response", response.map { Self.milliseconds($0.total * 1000) },
+                            color: Self.color(response.map { $0.total * 1000 }, warning: Self.responseWarning, severe: Self.responseSevere))
+                    } else {
+                        // Input response: input sent -> round trip -> remote -> local presentation.
+                        row(
+                            "Response", response.map { Self.milliseconds($0.total * 1000) },
+                            color: Self.color(response.map { $0.total * 1000 }, warning: Self.responseWarning, severe: Self.responseSevere))
+                        row(
+                            "  Network", roundTrip.map(Self.milliseconds),
+                            color: Self.color(roundTrip, warning: Self.roundTripWarning, severe: Self.roundTripSevere))
+                        row(
+                            "  " + remoteName, response.map { Self.milliseconds($0.remote * 1000) },
+                            color: Self.color(response.map { $0.remote * 1000 }, warning: Self.remoteWarning, severe: Self.remoteSevere))
+                        row(
+                            "  " + Self.deviceName, responseDevice.map(Self.milliseconds),
+                            color: Self.color(responseDevice, warning: Self.deviceWarning, severe: Self.deviceSevere))
+                    }
                     row("Bitrate", figures?.bitsPerSecond.map(Self.bitrate))
                     if figures?.lossy == true {
                         row(
@@ -167,7 +196,7 @@ struct DebugInfoView: View {
     }
 
     private static func milliseconds(_ value: Double) -> String {
-        value < 1 ? "<1ms" : String(format: "%.0fms", value)
+        (0..<1).contains(value) ? "<1ms" : String(format: "%.0fms", value)
     }
 }
 

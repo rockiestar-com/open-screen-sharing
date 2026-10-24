@@ -20,7 +20,7 @@ struct CustomizeToolbarView: View {
             let plan = layout.plan(for: controller, slots: slots)
             let categories = SessionCommandCategory.allCases.filter { !layout.otherCommands(in: $0).isEmpty }
             NavigationStackCompat {
-                List {
+                SheetForm(Text("Customize Toolbar")) {
                     Section {
                         ForEach(layout.bar, id: \.shownRowID) { command in
                             WithPerceptionTracking {
@@ -80,9 +80,7 @@ struct CustomizeToolbarView: View {
                 .environment(\.editMode, .constant(.active))
                 #endif
                 .animation(.default, value: layout.bar)
-                .navigationTitle("Customize Toolbar")
                 #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         CloseButton { dismiss() }

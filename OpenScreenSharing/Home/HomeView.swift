@@ -5,18 +5,19 @@ final class HomeActions {
     var newConnection: () -> Void = {}
 }
 
-#if os(macOS)
 @Perceptible
 final class HomeRequest {
     enum Pending: Equatable {
         case newConnection
         case settings
+        #if os(iOS) && (DEBUG || SIDELOAD)
+        case server
+        #endif
     }
 
     static let shared = HomeRequest()
     var pending: Pending?
 }
-#endif
 
 enum HomeTab: Hashable {
     case connections
@@ -50,9 +51,7 @@ struct HomeView: View {
     #if os(iOS) && (DEBUG || SIDELOAD)
     private let server = ServerController.shared
     #endif
-    #if os(macOS)
     private let homeRequest = HomeRequest.shared
-    #endif
 
     var body: some View {
         layout
@@ -129,15 +128,18 @@ struct HomeView: View {
             .focusedSceneValue(\.homeActions, actions)
             #if os(macOS)
             .modifier(UpdatePresentation())
+            #endif
             .onChangeCompat(of: homeRequest.pending, initial: true) { pending in
                 guard let pending else { return }
                 homeRequest.pending = nil
                 switch pending {
                 case .newConnection: newConnection()
                 case .settings: selection = .settings
+                #if os(iOS) && (DEBUG || SIDELOAD)
+                case .server: selection = .server
+                #endif
                 }
             }
-            #endif
     }
 
     @ViewBuilder

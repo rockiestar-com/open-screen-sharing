@@ -10,16 +10,13 @@ nonisolated struct DeviceServerStateChange: Sendable {
 nonisolated final class DeviceServerEvents: NSObject, LibsharingDeviceServerHandlerProtocol, @unchecked Sendable {
     private let deliver: @Sendable (DeviceServerStateChange) -> Void
     private let deliverViewer: @Sendable (_ viewerID: Int64, _ connected: Bool) -> Void
-    private let deliverAutoUnlockFailure: @Sendable (String, Bool) -> Void
 
     init(
         state deliver: @escaping @Sendable (DeviceServerStateChange) -> Void,
-        viewer deliverViewer: @escaping @Sendable (_ viewerID: Int64, _ connected: Bool) -> Void,
-        autoUnlockFailed deliverAutoUnlockFailure: @escaping @Sendable (String, Bool) -> Void
+        viewer deliverViewer: @escaping @Sendable (_ viewerID: Int64, _ connected: Bool) -> Void
     ) {
         self.deliver = deliver
         self.deliverViewer = deliverViewer
-        self.deliverAutoUnlockFailure = deliverAutoUnlockFailure
     }
 
     func onStateChanged(_ state: Int32, errorCode: Int32, message: String?) {
@@ -32,10 +29,6 @@ nonisolated final class DeviceServerEvents: NSObject, LibsharingDeviceServerHand
 
     func onViewerDisconnected(_ viewerID: Int64) {
         deliverViewer(viewerID, false)
-    }
-
-    func onAutoUnlockFailed(_ message: String?, inputStarted: Bool) {
-        deliverAutoUnlockFailure(message ?? "", inputStarted)
     }
 
     func backlightState() -> Int32 {

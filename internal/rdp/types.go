@@ -32,7 +32,6 @@ type Options struct {
 	KeepAlive          bool
 	DisableUDP         bool
 	GraphicsCache      string
-	DialTimeout        time.Duration
 	Logger             *slog.Logger
 }
 

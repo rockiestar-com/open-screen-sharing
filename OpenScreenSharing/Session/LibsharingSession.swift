@@ -830,6 +830,7 @@ nonisolated private final class LibsharingHandler: NSObject, LibsharingSessionHa
 
     func onVideoAccessUnit(_ unit: LibsharingVideoAccessUnit?) {
         guard let unit, let data = unit.data else { return }
+        let now = CACurrentMediaTime()
         delegate?.sessionReceivedVideo(
             VideoAccessUnit(
                 data: data,
@@ -842,7 +843,8 @@ nonisolated private final class LibsharingHandler: NSObject, LibsharingSessionHa
                 changedBands: Int(unit.changedBands),
                 discontinuity: unit.discontinuity,
                 turns: PictureTurns(Int(unit.turns)),
-                arrival: CACurrentMediaTime() - Double(max(unit.holdNanoseconds, 0)) / 1_000_000_000
+                arrival: now - Double(max(unit.holdNanoseconds, 0)) / 1_000_000_000,
+                composed: unit.composed ? now - Double(unit.composeNanoseconds) / 1_000_000_000 : nil
             ))
     }
 

@@ -67,7 +67,7 @@ func (c *RemoteClient) readPasscodeLayoutForApp(ctx context.Context, app transla
 	// nativeActiveKeyboard returns the active keyboard, else SpringBoard's
 	// search for an SBUIPasscodeLockNumberPad while the passcode lock is visible
 	// (24A446 UIAccessibility 0x1bb73be64, SpringBoard AX 0x2248c9098).
-	keyboard, err := c.query(ctx, requestAttribute, &app, attributeNative, map[string]any{"parameter": int64(nativeActiveKeyboard)})
+	keyboard, err := c.query(ctx, requestAttribute, &app, attributeNative, 0, map[string]any{"parameter": int64(nativeActiveKeyboard)})
 	if err != nil {
 		return out, err
 	}
@@ -79,13 +79,11 @@ func (c *RemoteClient) readPasscodeLayoutForApp(ctx context.Context, app transla
 	}
 	if frame := out.AppFrame; frame != nil && frame.Width > 0 && frame.Height > 0 {
 		// On iPhone18,2 this is inside the Face ID button and 18 pt above the
-		// keypad's first hit row (24A446,
-		// RE/24A446/SpringBoardUIServices/biometric-touch/findings.json).
+		// keypad's first hit row (24A446).
 		point := LayoutPoint{X: frame.X + frame.Width*0.5, Y: frame.Y + frame.Height*0.325}
 		if c.deviceClass == "iPad" {
 			// The biometric button is centered on the screen whatever the
-			// interface orientation; hit tests use the portrait-native space
-			// (RE/24A446/UIAccessibility/hit-test-coordinate-findings.json).
+			// interface orientation; hit tests use the portrait-native space (24A446).
 			point = LayoutPoint{X: min(frame.Width, frame.Height) / 2, Y: max(frame.Width, frame.Height) / 2}
 		}
 		if finiteLayoutNumber(point.X) && finiteLayoutNumber(point.Y) {
@@ -97,7 +95,7 @@ func (c *RemoteClient) readPasscodeLayoutForApp(ctx context.Context, app transla
 			code := uint64(0)
 			if raw.status != "valid" {
 				out.RawElementSource = "single"
-				response, readErr := c.query(ctx, requestAttribute, &app, attributeRawElementData, nil)
+				response, readErr := c.query(ctx, requestAttribute, &app, attributeRawElementData, 0, nil)
 				if readErr != nil {
 					return out, readErr
 				}
@@ -115,7 +113,7 @@ func (c *RemoteClient) readPasscodeLayoutForApp(ctx context.Context, app transla
 			}
 		}
 	}
-	front, err := c.query(ctx, requestFrontmost, nil, 0, map[string]any{"displayId": int64(1)})
+	front, err := c.query(ctx, requestFrontmost, nil, 0, 0, map[string]any{"displayId": int64(1)})
 	if err != nil {
 		return out, err
 	}
@@ -134,14 +132,14 @@ func (c *RemoteClient) readLayoutElement(ctx context.Context, obj translationObj
 	// class overrides it (24A446 UIAccessibility 0x1bb73b2b0, 0x1bb7655f0). The
 	// AXP class name attribute is unsupported on iOS; native 2185, the
 	// description, can include text.
-	class, err := c.query(ctx, requestAttribute, &obj, attributeNative, map[string]any{"parameter": int64(nativeClassName)})
+	class, err := c.query(ctx, requestAttribute, &obj, attributeNative, 0, map[string]any{"parameter": int64(nativeClassName)})
 	if err != nil {
 		return nil, err
 	}
 	if class.code == 0 {
 		out.Class = layoutClassName(class.value)
 	}
-	frame, err := c.query(ctx, requestAttribute, &obj, attributeFrame, nil)
+	frame, err := c.query(ctx, requestAttribute, &obj, attributeFrame, 0, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +172,7 @@ func (c *RemoteClient) readLayoutHit(ctx context.Context, app translationObject,
 		"NS.special":  int64(1),
 		"NS.pointval": "{" + strconv.FormatFloat(point.X, 'g', -1, 64) + ", " + strconv.FormatFloat(point.Y, 'g', -1, 64) + "}",
 	}, PrimitiveFields: []string{"NS.special"}}
-	hit, err := c.query(ctx, requestHitTest, &app, 0, map[string]any{"point": value, "displayId": int64(1), "contextId": int64(0)})
+	hit, err := c.query(ctx, requestHitTest, &app, 0, 0, map[string]any{"point": value, "displayId": int64(1), "contextId": int64(0)})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -32,7 +32,7 @@ func (c *RemoteClient) ReadPasscodePad(ctx context.Context) (*PasscodePad, error
 		return nil, E.New("accessibility: the lock-screen frame is unavailable")
 	}
 	width, height := min(screen.Width, screen.Height), max(screen.Width, screen.Height)
-	keyboard, err := c.query(ctx, requestAttribute, &app, attributeNative, map[string]any{"parameter": int64(nativeActiveKeyboard)})
+	keyboard, err := c.query(ctx, requestAttribute, &app, attributeNative, 0, map[string]any{"parameter": int64(nativeActiveKeyboard)})
 	if err != nil {
 		return nil, err
 	}
@@ -40,14 +40,14 @@ func (c *RemoteClient) ReadPasscodePad(ctx context.Context) (*PasscodePad, error
 	if keyboard.code != 0 || !ok || pad.application || pad.pid != app.pid {
 		return nil, ErrPasscodePadUnavailable
 	}
-	class, err := c.query(ctx, requestAttribute, &pad, attributeNative, map[string]any{"parameter": int64(nativeClassName)})
+	class, err := c.query(ctx, requestAttribute, &pad, attributeNative, 0, map[string]any{"parameter": int64(nativeClassName)})
 	if err != nil {
 		return nil, err
 	}
 	if class.code != 0 || layoutClassName(class.value) != "SBUIPasscodeLockNumberPad" {
 		return nil, E.Extend(ErrPasscodePadUnavailable, "the keyboard is not the numeric keypad")
 	}
-	children, err := c.query(ctx, requestAttributes, &pad, 0, map[string]any{"attributes": []any{int64(attributeChildren)}})
+	children, err := c.query(ctx, requestAttributes, &pad, 0, 0, map[string]any{"attributes": []any{int64(attributeChildren)}})
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (c *RemoteClient) ReadPasscodePad(ctx context.Context) (*PasscodePad, error
 		if !ok || object.application || object.pid != app.pid {
 			return nil, E.New("accessibility: the lock-screen keypad key is invalid")
 		}
-		attributes, err := c.query(ctx, requestAttributes, &object, 0, map[string]any{"attributes": []any{int64(attributeFrame), int64(attributeLabel)}})
+		attributes, err := c.query(ctx, requestAttributes, &object, 0, 0, map[string]any{"attributes": []any{int64(attributeFrame), int64(attributeLabel)}})
 		if err != nil {
 			return nil, err
 		}
@@ -97,13 +97,12 @@ func (c *RemoteClient) ReadPasscodePad(ctx context.Context) (*PasscodePad, error
 }
 
 // The passcode field's accessibility value is a localized string, not the
-// entered digits (24A446, RE/24A446/AccessibilityPlatformTranslation/
-// focused-attribute-evidence.json). The key below zero is Delete while digits
-// are entered and Cancel otherwise; only Delete carries these traits.
+// entered digits (24A446). The key below zero is Delete while digits are
+// entered and Cancel otherwise; only Delete carries these traits.
 func (c *RemoteClient) PasscodeEntered(ctx context.Context, pad *PasscodePad) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	response, err := c.query(ctx, requestAttributes, &pad.remove, 0, map[string]any{"attributes": []any{int64(attributeTraits)}})
+	response, err := c.query(ctx, requestAttributes, &pad.remove, 0, 0, map[string]any{"attributes": []any{int64(attributeTraits)}})
 	if err != nil {
 		return false, err
 	}

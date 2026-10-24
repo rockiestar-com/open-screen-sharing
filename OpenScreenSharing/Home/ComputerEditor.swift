@@ -60,7 +60,7 @@ struct ComputerEditor: View {
 
     var body: some View {
         NavigationStackCompat {
-            Form {
+            SheetForm(setup == nil ? Text("Edit Connection") : Text("New Connection")) {
                 Section {
                     LabeledContentCompat("Name") {
                         TextField("Name", text: $name, prompt: Text(verbatim: ""))
@@ -169,12 +169,6 @@ struct ComputerEditor: View {
                     }
                 }
             }
-            .navigationTitle(setup == nil ? Text("Edit Connection") : Text("New Connection"))
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #else
-            .formStyle(.grouped)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", role: .cancel) { dismiss() }
@@ -248,7 +242,7 @@ struct NearbyDetailsView: View {
 
     var body: some View {
         NavigationStackCompat {
-            Form {
+            SheetForm(Text(verbatim: computer.name)) {
                 Section {
                     LabeledContentCompat("Server Address") {
                         if let host = computer.hostName {
@@ -262,12 +256,6 @@ struct NearbyDetailsView: View {
                     }
                 }
             }
-            .navigationTitle(computer.name)
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #else
-            .formStyle(.grouped)
-            #endif
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     CloseButton { dismiss() }

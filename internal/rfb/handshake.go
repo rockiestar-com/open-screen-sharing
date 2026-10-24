@@ -89,28 +89,15 @@ func (h *handshake) negotiateVersion() error {
 	if err != nil {
 		return E.New("rfb: server greeting ", strconv.Quote(string(banner)), " is not RFB")
 	}
-	dialect := h.options.Dialect
-	if dialect == DialectAutomatic {
-		if server.apple() {
-			dialect = DialectApple
-		} else {
-			dialect = DialectStandard
-		}
-	}
+	dialect := DialectStandard
 	var client ProtocolVersion
-	maximum := 8
-	if h.options.MaximumVersion.Major == 3 && h.options.MaximumVersion.Minor > 0 {
-		maximum = h.options.MaximumVersion.Minor
-	}
 	switch {
-	case dialect == DialectApple:
-		if !server.apple() {
-			return E.Extend(ErrUnsupportedServer, "it speaks RFB ", server, ", not Apple's 003.889")
-		}
+	case server.apple():
+		dialect = DialectApple
 		client = ProtocolVersion{3, 889}
-	case (server.Major > 3 || server.Minor >= 8) && maximum >= 8:
+	case server.Major > 3 || server.Minor >= 8:
 		client = ProtocolVersion{3, 8}
-	case server.Minor >= 7 && maximum >= 7:
+	case server.Minor >= 7:
 		client = ProtocolVersion{3, 7}
 	default:
 		client = ProtocolVersion{3, 3}

@@ -149,10 +149,6 @@ func keyboardSourceMessage(id string) []byte {
 	return append(message, id...)
 }
 
-func (c *Client) SetKeyboardSource(id string) error {
-	return c.sendKeyboard(keyboardSourceMessage(id))
-}
-
 func (c *Client) SelectKeyboardSource(id string) error {
 	if id == "" {
 		return E.New("rfb: no input source")

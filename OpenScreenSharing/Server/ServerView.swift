@@ -200,13 +200,7 @@ struct ServerView: View {
         } header: {
             Text("Background Service")
         } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Screen Sharing needs to stay running in the background to keep sharing this device’s screen.")
-                if let problem = controller.backgroundProblem {
-                    Text(problem)
-                        .foregroundStyle(.red)
-                }
-            }
+            Text("Screen Sharing needs to stay running in the background to keep sharing this device’s screen.")
         }
         .onChangeCompat(of: settings.runsInBackground) { controller.updateBackground() }
         .onChangeCompat(of: settings.backgroundMode) { controller.updateBackground() }
@@ -238,7 +232,7 @@ struct ServerView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Screen Sharing needs your passcode to automatically unlock the device when connected.")
-                if let problem = settings.autoUnlockProblem ?? controller.autoUnlockProblem {
+                if let problem = settings.autoUnlockProblem {
                     Text(problem)
                         .foregroundStyle(.red)
                 }

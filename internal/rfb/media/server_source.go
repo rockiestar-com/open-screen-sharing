@@ -4,8 +4,11 @@ import (
 	"context"
 	"time"
 
+	"github.com/sagernet/sing/common/buf"
 	E "github.com/sagernet/sing/common/exceptions"
 )
+
+const ServerRearHeadroom = bandPositionGrowth + authTagLength
 
 type ServerVideoRequest struct {
 	ClientSSRC     uint32
@@ -27,10 +30,15 @@ type ServerVideoInfo struct {
 	TilesPerFrame int
 }
 
+type ServerPacket struct {
+	Buffer  *buf.Buffer
+	RTCP    bool
+	Arrival time.Time
+}
+
 type ServerVideoSource interface {
 	Info() ServerVideoInfo
-	ReadPacket(ctx context.Context, buffer []byte) (n int, rtcp bool, err error)
-	PacketArrival() time.Time
+	ReadPackets(ctx context.Context, packets []ServerPacket) (int, error)
 	WriteRTCP(packet []byte) error
 	RequestKeyFrame() error
 	Close() error
@@ -56,7 +64,7 @@ type ServerAudioInfo struct {
 
 type ServerAudioSource interface {
 	Info() ServerAudioInfo
-	ReadPacket(ctx context.Context, buffer []byte) (n int, rtcp bool, err error)
+	ReadPackets(ctx context.Context, packets []ServerPacket) (int, error)
 	WriteRTCP(packet []byte) error
 	Close() error
 }

@@ -36,7 +36,7 @@ func (c *RemoteClient) FindUnlockButton(ctx context.Context, layout PasscodeLayo
 	}
 	data := raw.data
 	if len(data) == 0 {
-		response, err := c.query(ctx, requestAttribute, &app, attributeRawElementData, nil)
+		response, err := c.query(ctx, requestAttribute, &app, attributeRawElementData, 0, nil)
 		if err != nil {
 			return LayoutPoint{}, false, err
 		}

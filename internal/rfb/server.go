@@ -55,13 +55,7 @@ type ServerOptions struct {
 	Logger           *slog.Logger
 	Handler          ServerHandler
 
-	Flags                     uint32
-	Commands                  []uint8
-	CommandBitmap             *[16]byte
-	RekeyAfterEncryptionStart bool
-	SystemCommands            []SystemCommand
-	DeviceModel               string
-	DisplayFlags              uint32
+	SystemCommands []SystemCommand
 
 	Media media.ServerStreamConfig
 }
@@ -71,7 +65,6 @@ type Server struct {
 	logger   *slog.Logger
 	handler  ServerHandler
 	verifier *srpVerifier
-	commands [16]byte
 
 	access          sync.Mutex
 	closed          bool
@@ -90,12 +83,6 @@ func NewServer(options ServerOptions) (*Server, error) {
 	if options.Password == "" && !options.NoAuthentication {
 		return nil, E.New("rfb: the server needs a password")
 	}
-	if options.Flags == 0 {
-		options.Flags = DefaultServerFlags
-	}
-	if options.DisplayFlags == 0 {
-		options.DisplayFlags = DisplayFlagMain
-	}
 	s := &Server{
 		options:   options,
 		logger:    options.Logger,
@@ -104,19 +91,6 @@ func NewServer(options ServerOptions) (*Server, error) {
 		listeners: make(map[net.Listener]struct{}),
 		conns:     make(map[net.Conn]struct{}),
 		sessions:  make(map[*ServerSession]struct{}),
-	}
-	if options.CommandBitmap != nil {
-		s.commands = *options.CommandBitmap
-	} else {
-		commands := options.Commands
-		if commands == nil {
-			commands = DefaultServerCommands
-		}
-		bitmap, err := commandBitmap(commands)
-		if err != nil {
-			return nil, err
-		}
-		s.commands = bitmap
 	}
 	password := options.Password
 	if options.NoAuthentication {

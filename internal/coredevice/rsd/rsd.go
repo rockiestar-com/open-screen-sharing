@@ -22,6 +22,13 @@ const (
 	remoteXPCVersionFlags    = 0x0100000000000006
 )
 
+// remoted maps TlsPolicy 1, 2 and 3 to disabled, optional and required, and
+// finishes a peer's handshake only after the peer answers the device's
+// StartTls; macOS answers with YesNo false and TlsPolicy 1 (remoted, macOS
+// 27.0.1 26A434, 0x1000076c4..0x100007728, 0x100008e2c..0x100009090,
+// 0x1000194b4; observed on iPhone18,2, iOS 27.2 24B115).
+const tlsPolicyDisabled = 1
+
 type Peer struct {
 	MessagingProtocolVersion uint64
 	Properties               map[string]any
@@ -52,6 +59,18 @@ func Handshake(ctx context.Context, conn *xpc.Conn, identity uuid.UUID) (*Peer, 
 		}
 		return parsePeer(message.Body)
 	}
+}
+
+func DeclineTLS(conn *xpc.Conn) error {
+	err := conn.Send(map[string]any{
+		"MessageType": "StartTls",
+		"YesNo":       false,
+		"TlsPolicy":   uint64(tlsPolicyDisabled),
+	}, false)
+	if err != nil {
+		return E.Cause(err, "decline RSD TLS")
+	}
+	return nil
 }
 
 func parsePeer(body map[string]any) (*Peer, error) {

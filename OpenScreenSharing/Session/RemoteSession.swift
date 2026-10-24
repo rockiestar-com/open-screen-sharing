@@ -354,11 +354,13 @@ nonisolated struct VideoAccessUnit: @unchecked Sendable {
     var discontinuity: Bool
     var turns: PictureTurns
     var arrival: CFTimeInterval
+    var composed: CFTimeInterval?
 }
 
 nonisolated struct FrameTiming: Sendable {
     var arrival: CFTimeInterval
     var capture: CFTimeInterval
+    var composed: CFTimeInterval?
 }
 
 nonisolated struct DecodedVideoFrame: @unchecked Sendable {

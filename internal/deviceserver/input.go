@@ -8,7 +8,6 @@ import (
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice"
 	"github.com/nekohasekai/open-screen-sharing/internal/coredevice/hid"
 	"github.com/nekohasekai/open-screen-sharing/internal/rfb"
-	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 )
 
@@ -47,7 +46,7 @@ type inputWorker struct {
 	generation    uint64
 	touch         touchMapper
 	keys          *keyboard
-	unlockPending []inputItem
+	unlockPending bool
 	lockState     *coredevice.LockStateConn
 	closeErr      error
 }
@@ -147,7 +146,7 @@ func (w *inputWorker) viewerConnected(session *rfb.ServerSession) {
 	w.sessions[session] = inputSession{context: owner, cancel: cancel}
 	w.access.Unlock()
 	if w.server.options.AutoUnlockPasscode != "" {
-		w.push(inputItem{session: session, owner: owner, unlock: true})
+		w.push(inputItem{unlock: true})
 	}
 }
 
@@ -233,12 +232,7 @@ func (w *inputWorker) handle(item inputItem) {
 		return
 	}
 	if item.unlock {
-		w.unlockPending = append(w.unlockPending, item)
-	}
-	if item.release {
-		w.unlockPending = common.Filter(w.unlockPending, func(request inputItem) bool {
-			return request.session != item.session
-		})
+		w.unlockPending = true
 	}
 	a := w.server.currentDevice()
 	if w.client != nil && (a == nil || a.device != w.device) {
@@ -265,7 +259,7 @@ func (w *inputWorker) handle(item inputItem) {
 			}
 		}
 		return
-	case item.event == nil && len(w.unlockPending) == 0:
+	case item.event == nil && !w.unlockPending:
 		return
 	}
 	running, _, generation := w.server.streams.inputState()
@@ -277,22 +271,8 @@ func (w *inputWorker) handle(item inputItem) {
 		w.device = a.device
 		w.generation = generation
 	}
-	for len(w.unlockPending) > 0 {
-		request := w.unlockPending[0]
-		w.unlockPending[0] = inputItem{}
-		w.unlockPending = w.unlockPending[1:]
-		if request.owner.Err() != nil {
-			continue
-		}
-		unlockContext, cancel := inputContext(a, request.owner)
-		consumed := w.checkUnlock(unlockContext, a)
-		cancel()
-		if consumed {
-			if len(w.unlockPending) > 0 {
-				w.push(inputItem{})
-			}
-			return
-		}
+	if w.unlockPending && w.checkUnlock(a) {
+		return
 	}
 	if item.event == nil || item.owner.Err() != nil {
 		return

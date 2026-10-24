@@ -14,7 +14,7 @@ struct PairingSetupView: View {
     var body: some View {
         WithPerceptionTracking {
             NavigationStackCompat {
-                Form {
+                SheetForm(Text("Pair with This Device")) {
                     Section {
                         if case .code(let pin) = session.state {
                             PairingCodeView(pin: pin)
@@ -38,8 +38,6 @@ struct PairingSetupView: View {
                     }
                     .disabled(session.isInProgress)
                 }
-                .navigationTitle("Pair with This Device")
-                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Cancel", role: .cancel) {
