@@ -608,6 +608,8 @@ final class KeyShortcuts {
         ("b", .command), ("i", .command), ("u", .command), ("e", .command), ("f", .command), ("f", [.command, .alternate]),
         ("g", .command), ("g", [.command, .shift]), ("-", .command), ("=", [.command, .shift]), ("[", [.command, .shift]),
         ("]", [.command, .shift]), ("\\", [.command, .shift]), ("s", [.command, .control]),
+        // iPadOS quits or hides the app for these unless a key command claims them first.
+        ("q", .command), ("h", .command),
     ]
 
     func passthroughKeyCommands(includingAssigned: Bool) -> [UIKeyCommand] {
