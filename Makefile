@@ -10,6 +10,14 @@ lib:
 build_ios:
 	xcodebuild build -skipMacroValidation -scheme OpenScreenSharing -configuration Debug -destination 'generic/platform=iOS' | xcbeautify | grep -A 10 -e "Build Succeeded" -e "BUILD FAILED" -e "❌"
 
+DEV_DEVICE ?= 00008103-001E15990C0B001E
+
+install_dev_ios:
+	xcodebuild build -skipMacroValidation -allowProvisioningUpdates -scheme OpenScreenSharing -configuration Debug -destination 'id=$(DEV_DEVICE)' -derivedDataPath build/dd \
+		DEVELOPMENT_TEAM=DH5UQL44AR PRODUCT_BUNDLE_IDENTIFIER=com.rockiestar.screensharing CODE_SIGN_STYLE=Automatic \
+		ASSETCATALOG_COMPILER_APPICON_NAME=DevIcon INFOPLIST_KEY_CFBundleDisplayName="OSS Dev" EXCLUDED_SOURCE_FILE_NAMES=InfoPlist.xcstrings | xcbeautify | grep -A 10 -e "Build Succeeded" -e "BUILD FAILED" -e "❌"
+	xcrun devicectl device install app --device $(DEV_DEVICE) "build/dd/Build/Products/Debug-iphoneos/Screen Sharing.app"
+
 release_ios: lib archive_ios upload_ios
 
 archive_ios:
