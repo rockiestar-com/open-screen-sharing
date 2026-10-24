@@ -95,6 +95,11 @@ struct AppCommands: Commands {
 
         #if os(macOS)
         CommandGroup(replacing: .help) {}
+        #else
+        // iPadOS performs Quit (⌘Q) and Hide (⌘H) from the main menu before the remote screen sees the press,
+        // so drop them and let the chords reach the remote.
+        CommandGroup(replacing: .appTermination) {}
+        CommandGroup(replacing: .appVisibility) {}
         #endif
     }
 }

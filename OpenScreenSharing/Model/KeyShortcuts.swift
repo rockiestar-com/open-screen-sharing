@@ -506,10 +506,35 @@ final class KeyShortcuts {
     init() {
         assigned = store.value([String: KeyShortcut].self, for: Self.key) ?? [:]
         mappings = Dictionary(uniqueKeysWithValues: MappingTarget.allCases.map { [store] target in
-            (target, store.value([KeyMapping].self, for: Self.mappingsKey(target)) ?? [])
+            (target, store.value([KeyMapping].self, for: Self.mappingsKey(target)) ?? Self.defaultMappings(for: target))
         })
         #if os(macOS)
         pointerRelease = store.value(UInt.self, for: Self.pointerReleaseKey).map(NSEvent.ModifierFlags.init(rawValue:)) ?? Self.defaultPointerRelease
+        #endif
+    }
+
+    // iPadOS keeps ⌘Q and ⌘H for itself in some contexts, so ⌃Q and ⌃H stand in for them on Apple remotes.
+    private static func defaultMappings(for target: MappingTarget) -> [KeyMapping] {
+        #if os(iOS)
+        switch target {
+        case .apple:
+            [
+                KeyMapping(
+                    id: UUID(uuidString: "6F1C2D3E-0A51-4C0B-9E77-3B1D7A0C5E01")!,
+                    trigger: KeyShortcut(key: "q", modifiers: .control),
+                    steps: [.key(KeyShortcut(key: "q", modifiers: .command))]
+                ),
+                KeyMapping(
+                    id: UUID(uuidString: "6F1C2D3E-0A51-4C0B-9E77-3B1D7A0C5E02")!,
+                    trigger: KeyShortcut(key: "h", modifiers: .control),
+                    steps: [.key(KeyShortcut(key: "h", modifiers: .command))]
+                ),
+            ]
+        case .pc:
+            []
+        }
+        #else
+        []
         #endif
     }
 
@@ -517,7 +542,7 @@ final class KeyShortcuts {
         #if os(macOS)
         if pointerRelease != Self.defaultPointerRelease { return true }
         #endif
-        return !assigned.isEmpty || mappings.values.contains { !$0.isEmpty }
+        return !assigned.isEmpty || MappingTarget.allCases.contains { mappings(for: $0) != Self.defaultMappings(for: $0) }
     }
 
     func shortcut(for action: ShortcutAction) -> KeyShortcut? {
@@ -570,7 +595,7 @@ final class KeyShortcuts {
         assigned = [:]
         store.remove(Self.key)
         for target in MappingTarget.allCases {
-            mappings[target] = []
+            mappings[target] = Self.defaultMappings(for: target)
             store.remove(Self.mappingsKey(target))
         }
         #if os(macOS)
