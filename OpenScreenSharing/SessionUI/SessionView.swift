@@ -90,8 +90,10 @@ struct SessionView: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     if settings.showsDebugInfo, controller.phase.isActive {
+                        let inset = controller.debugInfoInset
                         DebugInfoView(controller: controller)
-                            .padding(8)
+                            .padding(EdgeInsets(top: inset ?? 8, leading: 8, bottom: 8, trailing: inset ?? 8))
+                            .ignoresSafeArea(edges: inset == nil ? [] : [.top, .trailing])
                             .allowsHitTesting(false)
                     }
                 }

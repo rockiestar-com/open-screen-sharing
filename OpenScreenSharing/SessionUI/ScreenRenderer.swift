@@ -45,6 +45,10 @@ final class ScreenRenderer {
             return float4(texture.sample(textureSampler, in.textureCoordinate).rgb, 1);
         }
 
+        fragment float4 blackFragment(QuadVertex in [[stage_in]]) {
+            return float4(0, 0, 0, 1);
+        }
+
         fragment float4 cursorFragment(QuadVertex in [[stage_in]], texture2d<float> texture [[texture(0)]], sampler textureSampler [[sampler(0)]]) {
             return texture.sample(textureSampler, in.textureCoordinate);
         }
@@ -121,6 +125,7 @@ final class ScreenRenderer {
 
     private struct Pipelines {
         var screen: MTLRenderPipelineState
+        var black: MTLRenderPipelineState
         var cursor: MTLRenderPipelineState
         var maskedCursor: MTLRenderPipelineState?
         var cursorInversion: MTLRenderPipelineState?
@@ -159,6 +164,8 @@ final class ScreenRenderer {
             descriptor.fragmentFunction = library.makeFunction(name: "screenFragment")
             descriptor.colorAttachments[0].pixelFormat = pixelFormat
             let screen = try device.makeRenderPipelineState(descriptor: descriptor)
+            descriptor.fragmentFunction = library.makeFunction(name: "blackFragment")
+            let black = try device.makeRenderPipelineState(descriptor: descriptor)
             var backdropPointer: MTLRenderPipelineState?
             if let function = pointerLibrary?.makeFunction(name: pointerFunction) {
                 descriptor.fragmentFunction = function
@@ -179,7 +186,8 @@ final class ScreenRenderer {
                 descriptor.fragmentFunction = library.makeFunction(name: "pointerFallbackFragment")
                 pointer = try device.makeRenderPipelineState(descriptor: descriptor)
             }
-            var pipelines = Pipelines(screen: screen, cursor: cursor, pointer: pointer, pointerReadsBackdrop: backdropPointer != nil)
+            var pipelines = Pipelines(
+                screen: screen, black: black, cursor: cursor, pointer: pointer, pointerReadsBackdrop: backdropPointer != nil)
             guard invertsCursor else { return pipelines }
             descriptor.fragmentFunction = library.makeFunction(name: "maskedCursorFragment")
             pipelines.maskedCursor = try device.makeRenderPipelineState(descriptor: descriptor)
@@ -221,10 +229,12 @@ final class ScreenRenderer {
         var turns: PictureTurns
         var cursor: CursorShape?
         var cursorRect: CGRect?
+        var cursorShownBySystem: Bool
         var cursorOverDarkBackdrop: Bool?
         var viewSize: CGSize
         var pixelsPerImagePixel: CGFloat
         var pixelsPerCursorPixel: CGFloat
+        var loupe: LoupeSpot?
     }
 
     func render(
@@ -258,7 +268,7 @@ final class ScreenRenderer {
             }
         }
         var drawnCursor: (texture: MTLTexture, inversion: MTLTexture?, rect: CGRect, sampler: MTLSamplerState, material: [SIMD4<Float>]?)?
-        if let cursor = frame.cursor, let cursorRect = frame.cursorRect {
+        if let cursor = frame.cursor, let cursorRect = frame.cursorRect, !frame.cursorShownBySystem || frame.loupe != nil {
             let mipmapped = cursor.scale > 1
             guard let texture = texture(for: cursor.image, mipmapped: mipmapped) else { return false }
             var inversion: MTLTexture?
@@ -283,18 +293,22 @@ final class ScreenRenderer {
         pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else { return false }
         let sampler = self.sampler(pixelsPerTexel: frame.pixelsPerImagePixel)
-        for image in images {
-            draw(
-                image.texture, in: image.rect, textureRect: image.textureRect, turns: frame.turns, viewSize: frame.viewSize,
-                sampler: sampler, pipeline: pipelines.screen, encoder: encoder)
-        }
-        if let drawnCursor {
-            var rect = ndc(drawnCursor.rect, in: frame.viewSize)
+        func setUnturnedQuad(_ rect: CGRect) {
+            var position = ndc(rect, in: frame.viewSize)
             var textureRect = SIMD4<Float>(0, 0, 1, 1)
             var turns: UInt32 = 0
-            encoder.setVertexBytes(&rect, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
+            encoder.setVertexBytes(&position, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
             encoder.setVertexBytes(&textureRect, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
             encoder.setVertexBytes(&turns, length: MemoryLayout<UInt32>.size, index: 2)
+        }
+        func drawContent(dx: CGFloat, dy: CGFloat, drawsCursor: Bool) {
+            for image in images {
+                draw(
+                    image.texture, in: image.rect.offsetBy(dx: dx, dy: dy), textureRect: image.textureRect, turns: frame.turns,
+                    viewSize: frame.viewSize, sampler: sampler, pipeline: pipelines.screen, encoder: encoder)
+            }
+            guard drawsCursor, let drawnCursor else { return }
+            setUnturnedQuad(drawnCursor.rect.offsetBy(dx: dx, dy: dy))
             encoder.setFragmentTexture(drawnCursor.texture, index: 0)
             encoder.setFragmentSamplerState(drawnCursor.sampler, index: 0)
             if let material = drawnCursor.material {
@@ -313,6 +327,18 @@ final class ScreenRenderer {
                 encoder.setRenderPipelineState(pipelines.cursor)
             }
             encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+        drawContent(dx: 0, dy: 0, drawsCursor: !frame.cursorShownBySystem)
+        if let loupe = frame.loupe {
+            let pixelsPerPoint = CGFloat(drawable.texture.width) / frame.viewSize.width
+            encoder.setScissorRect(
+                MTLScissorRect(
+                    x: Int((loupe.frame.minX * pixelsPerPoint).rounded()), y: Int((loupe.frame.minY * pixelsPerPoint).rounded()),
+                    width: Int((loupe.frame.width * pixelsPerPoint).rounded()), height: Int((loupe.frame.height * pixelsPerPoint).rounded())))
+            setUnturnedQuad(loupe.frame)
+            encoder.setRenderPipelineState(pipelines.black)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+            drawContent(dx: loupe.frame.minX - loupe.source.minX, dy: loupe.frame.minY - loupe.source.minY, drawsCursor: true)
         }
         encoder.endEncoding()
         let containsImage = !images.isEmpty
@@ -482,9 +508,10 @@ protocol RemoteScreen: AnyObject {
     var imageRect: CGRect { get }
     var displayScale: CGFloat { get }
     var isOccluded: Bool { get }
-    func drawnCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) -> CursorShape?
+    func drawnCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) -> (shape: CursorShape, shownBySystem: Bool)?
     #if os(iOS)
     func cursorDidRender(in rect: CGRect?)
+    func loupe(for icon: CGRect?) -> LoupeSpot?
     #endif
 }
 
@@ -680,30 +707,8 @@ final class ScreenPresenter {
         let cursorScale = max(
             scale * controller.info.framebufferPixelsPerCursorPixel, 1 / (controller.cursorPixelsPerPoint * resolutionScale))
         let cursor = screen.drawnCursor(snapshot.cursor, visible: snapshot.cursorVisible, scale: cursorScale)
-        #if os(iOS)
-        // pointeruid tracks the luma behind the pointer with a 19 x 19 pt _UILumaTrackingBackdropView, which turns the
-        // pointer light at luma <= 0.45 and dark at >= 0.55, and splits a first sample in between at 0.5; Core
-        // Animation takes the luma as 0.2126 R + 0.7152 G + 0.0722 B of the mean encoded backdrop colour (pointeruid
-        // 172, iPadOS 27.2 24B5110a, UUID DC5440B7-2A3E-3CB1-BFC8-F86EEB565E5C,
-        // -[PUIDSystemPointerRootViewController viewDidLoad] 0x10001e6ec..0x10001e714, sub_100007328
-        // 0x100007360..0x100007374; UIKitCore 9127.1.13.1.106, UUID 56EB6C8F-D489-378F-AABA-81975A6D213E,
-        // -[_UILumaTrackingBackdropView backdropLayer:didChangeLuma:] 0x184b9654c..0x184b966c8; QuartzCore 1223.10.19,
-        // UUID 2F6224C2-91DC-30A3-A132-806F887DD1D8, CA::OGL::MetalContext::calculate_average_luma block
-        // 0x18460876c..0x1846087b8).
-        if cursor?.material != nil,
-            let brightness = Self.brightness(of: snapshot, around: snapshot.cursorPosition, radius: Self.backdropSampleSize / 2 / scale)
-        {
-            if brightness >= 0.55 {
-                cursorOverDarkBackdrop = false
-            } else if brightness <= 0.45 {
-                cursorOverDarkBackdrop = true
-            } else if cursorOverDarkBackdrop == nil {
-                cursorOverDarkBackdrop = brightness < 0.5
-            }
-        }
-        #endif
         var cursorRect: CGRect?
-        if let cursor, snapshot.cursorVisible, controller.phase == .connected {
+        if let cursor = cursor?.shape, snapshot.cursorVisible, controller.phase == .connected {
             let origin = CGPoint(
                 x: imageRect.minX + snapshot.cursorPosition.x * scale - cursor.hotspot.x * cursorScale,
                 y: imageRect.minY + snapshot.cursorPosition.y * scale - cursor.hotspot.y * cursorScale
@@ -715,7 +720,30 @@ final class ScreenPresenter {
                     height: CGFloat(cursor.image.height) / cursor.scale * cursorScale))
         }
         #if os(iOS)
-        screen.cursorDidRender(in: cursorRect)
+        screen.cursorDidRender(in: cursor?.shownBySystem == false ? cursorRect : nil)
+        let loupe = screen.loupe(for: cursorRect)
+        // pointeruid tracks the luma behind the pointer with a 19 x 19 pt _UILumaTrackingBackdropView, which turns the
+        // pointer light at luma <= 0.45 and dark at >= 0.55, and splits a first sample in between at 0.5; Core
+        // Animation takes the luma as 0.2126 R + 0.7152 G + 0.0722 B of the mean encoded backdrop colour (pointeruid
+        // 172, iPadOS 27.2 24B5110a, UUID DC5440B7-2A3E-3CB1-BFC8-F86EEB565E5C,
+        // -[PUIDSystemPointerRootViewController viewDidLoad] 0x10001e6ec..0x10001e714, sub_100007328
+        // 0x100007360..0x100007374; UIKitCore 9127.1.13.1.106, UUID 56EB6C8F-D489-378F-AABA-81975A6D213E,
+        // -[_UILumaTrackingBackdropView backdropLayer:didChangeLuma:] 0x184b9654c..0x184b966c8; QuartzCore 1223.10.19,
+        // UUID 2F6224C2-91DC-30A3-A132-806F887DD1D8, CA::OGL::MetalContext::calculate_average_luma block
+        // 0x18460876c..0x1846087b8).
+        if let cursor, cursor.shape.material != nil, !cursor.shownBySystem || loupe != nil,
+            let brightness = Self.brightness(of: snapshot, around: snapshot.cursorPosition, radius: Self.backdropSampleSize / 2 / scale)
+        {
+            if brightness >= 0.55 {
+                cursorOverDarkBackdrop = false
+            } else if brightness <= 0.45 {
+                cursorOverDarkBackdrop = true
+            } else if cursorOverDarkBackdrop == nil {
+                cursorOverDarkBackdrop = brightness < 0.5
+            }
+        }
+        #else
+        let loupe: LoupeSpot? = nil
         #endif
         let committed = CACurrentMediaTime()
         let commit = commits &+ 1
@@ -728,12 +756,14 @@ final class ScreenPresenter {
                 canvasHeight: snapshot.canvasHeight,
                 imageRect: imageRect,
                 turns: snapshot.turns,
-                cursor: cursor,
+                cursor: cursor?.shape,
                 cursorRect: cursorRect,
+                cursorShownBySystem: cursor?.shownBySystem ?? false,
                 cursorOverDarkBackdrop: cursorOverDarkBackdrop,
                 viewSize: viewSize,
                 pixelsPerImagePixel: scale * layer.contentsScale,
-                pixelsPerCursorPixel: cursorScale * layer.contentsScale
+                pixelsPerCursorPixel: cursorScale * layer.contentsScale,
+                loupe: loupe
             ),
             in: layer,
             presented: { [weak self, pipeline, debugInfo = controller.debugInfo] time, composited in

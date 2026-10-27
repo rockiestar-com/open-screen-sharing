@@ -45,6 +45,7 @@ nonisolated final class LibsharingRemoteSession: @unchecked Sendable {
         options.decoderMaxPixelRate = DecoderCapabilities.current.maximumPixelRate
         options.maximumFrameRate = Int32(configuration.networkConfiguration.maximumFrameRate.rawValue)
         options.updateRate = Int32(configuration.updateRate)
+        options.awaitVirtualDisplay = configuration.awaitsVirtualDisplay
         options.keepAlive = configuration.keepsAlive
         options.disableUDP = configuration.disablesUDP
         options.cacheDirectory = AppDirectory.caches.path

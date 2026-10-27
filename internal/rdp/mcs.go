@@ -165,10 +165,10 @@ func readBER(r *reader, expected ...byte) *reader {
 	return r.sub(n)
 }
 
-func clientUserData(opts Options, protocol uint32, channels []*staticChannel) []byte {
+func clientUserData(opts Options, width, height, scale int, protocol uint32, channels []*staticChannel) []byte {
 	core := binary.LittleEndian.AppendUint32(nil, rdpVersion5Plus)
-	core = binary.LittleEndian.AppendUint16(core, uint16(opts.Width))
-	core = binary.LittleEndian.AppendUint16(core, uint16(opts.Height))
+	core = binary.LittleEndian.AppendUint16(core, uint16(width))
+	core = binary.LittleEndian.AppendUint16(core, uint16(height))
 	core = binary.LittleEndian.AppendUint16(core, colorDepth8)
 	core = binary.LittleEndian.AppendUint16(core, secureAccessSequenceDelete)
 	core = binary.LittleEndian.AppendUint32(core, opts.KeyboardLayout)
@@ -190,7 +190,7 @@ func clientUserData(opts Options, protocol uint32, channels []*staticChannel) []
 	core = binary.LittleEndian.AppendUint32(core, 0)
 	core = binary.LittleEndian.AppendUint32(core, 0)
 	core = binary.LittleEndian.AppendUint16(core, 0)
-	core = binary.LittleEndian.AppendUint32(core, uint32(opts.DesktopScaleFactor))
+	core = binary.LittleEndian.AppendUint32(core, uint32(scale))
 	core = binary.LittleEndian.AppendUint32(core, deviceScaleFactor)
 	network := binary.LittleEndian.AppendUint32(nil, uint32(len(channels)))
 	for _, channel := range channels {
@@ -212,12 +212,12 @@ func clientUserData(opts Options, protocol uint32, channels []*staticChannel) []
 	return append(b, data...)
 }
 
-func (m *mcsLayer) connect(opts Options, channels []*staticChannel) error {
+func (m *mcsLayer) connect(opts Options, width, height, scale int, channels []*staticChannel) error {
 	b := slices.Concat(mcsDomainSelector, mcsDomainSelector, mcsUpwardFlag)
 	b = append(b, domainParameters(mcsTargetDomain)...)
 	b = append(b, domainParameters(mcsMinimumDomain)...)
 	b = append(b, domainParameters(mcsMaximumDomain)...)
-	b = append(b, berValue([]byte{berTagOctetString}, clientUserData(opts, m.transport.protocol, channels))...)
+	b = append(b, berValue([]byte{berTagOctetString}, clientUserData(opts, width, height, scale, m.transport.protocol, channels))...)
 	err := m.outbox.Push(tpkt(berValue(mcsConnectInitial, b)), false)
 	if err != nil {
 		return err

@@ -96,7 +96,7 @@ type Options struct {
 
 	Logger *slog.Logger
 
-	Prepare func(*Client)
+	Prepare func(*Client) error
 }
 
 type Rectangle struct {

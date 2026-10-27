@@ -161,6 +161,11 @@ final class ScreenInput: NSObject, UIGestureRecognizerDelegate, UIPointerInterac
             }
             if gestureRecognizer === secondaryTapGesture || gestureRecognizer === twoFingerPanGesture { return false }
         }
+        if gestureRecognizer === pinchGesture || gestureRecognizer === rotationGesture, gestureRecognizer.numberOfTouches > 0,
+            !AppSettings.shared.pinchZooms
+        {
+            return controller.sendsGesturesToMac
+        }
         if gestureRecognizer === rotationGesture {
             return gestureRecognizer.numberOfTouches == 0 && controller.sendsGesturesToMac
         }
@@ -593,7 +598,8 @@ final class ScreenInput: NSObject, UIGestureRecognizerDelegate, UIPointerInterac
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
         if gesture.state == .began {
             pinchGoesToMac =
-                controller.sendsGesturesToMac && !controller.isZoomModeOn && (gesture.numberOfTouches == 0 || fingersTouchDirectly)
+                controller.sendsGesturesToMac && !controller.isZoomModeOn
+                && (gesture.numberOfTouches == 0 || fingersTouchDirectly || !AppSettings.shared.pinchZooms)
             touchGestureBegan(gesture)
         }
         if pinchGoesToMac {

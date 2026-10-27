@@ -86,11 +86,8 @@ func negotiateTransport(ctx context.Context, opts Options, authenticating func()
 	if err != nil {
 		return nil, err
 	}
-	err = opts.VerifyCertificate(fingerprint(certificate))
-	if err != nil {
-		return nil, err
-	}
-	if t.protocol != protocolSSL {
+	authenticated := t.protocol != protocolSSL
+	if authenticated {
 		if authenticating != nil {
 			authenticating()
 		}
@@ -98,6 +95,10 @@ func negotiateTransport(ctx context.Context, opts Options, authenticating func()
 		if err != nil {
 			return nil, err
 		}
+	}
+	err = opts.VerifyCertificate(fingerprint(certificate), authenticated)
+	if err != nil {
+		return nil, err
 	}
 	err = ctx.Err()
 	if err != nil {

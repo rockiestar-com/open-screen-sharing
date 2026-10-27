@@ -404,7 +404,7 @@ final class ServerController {
             localNetworkDenied = false
             return
         }
-        let errorCode = advertiser.start(name: name, type: "_rfb._tcp", port: settings.port, txt: ["model": Self.model])
+        let errorCode = advertiser.start(name: name, type: "_rfb._tcp", port: settings.port, txt: ["model": DeviceModel.identifier])
         if errorCode != kDNSServiceErr_NoError {
             advertisingFailed(errorCode)
         }
@@ -415,10 +415,4 @@ final class ServerController {
         localNetworkDenied = errorCode == kDNSServiceErr_PolicyDenied
         Self.logger.error("DNSServiceRegister: error \(errorCode, privacy: .public)")
     }
-
-    private static let model: String = {
-        var system = utsname()
-        uname(&system)
-        return withUnsafeBytes(of: &system.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-    }()
 }

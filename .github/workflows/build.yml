@@ -36,7 +36,7 @@ jobs:
           if [ -n "$ASC_KEY" ]; then
             export ASC_KEY_PATH=$RUNNER_TEMP/ApiKey_$ASC_KEY_ID.p8
             echo -n "$ASC_KEY" | base64 --decode > "$ASC_KEY_PATH"
-            VERSION=$(go run ./cmd/internal/app_store_connect next_marketing_version)
+            VERSION=$(go run ./cmd/internal/app_store_connect next_marketing_version "$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')")
             echo "version=$VERSION"
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           fi
@@ -50,6 +50,7 @@ jobs:
         env:
           ASC_KEY: ${{ secrets.ASC_KEY }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          GH_TOKEN: ${{ github.token }}
   build_apple_library:
     name: Build Apple library (${{ matrix.artifact }})
     runs-on: xcode-27

@@ -268,6 +268,10 @@ func (c *Client) startApple() error {
 	if c.wrapKey == [16]byte{} {
 		return E.New("rfb: security type ", c.info.SecurityType, " left no key for the record layer")
 	}
+	displayChanges, err := c.prepare()
+	if err != nil {
+		return err
+	}
 	var prelude []byte
 	prelude = append(prelude, viewerInfoMessage()...)
 	prelude = append(prelude, setModeMessage(c.mode)...)
@@ -282,7 +286,7 @@ func (c *Client) startApple() error {
 	// (ScreenSharing 776.27, macOS 27.0.1 26A434, UUID EC0B2C20-F816-3FCE-822D-F9403C09EB50,
 	// -[SSSession stConfigureSession] 0x1cc05fc10..0x1cc060590, _HandleFramebufferUpdate 0x1cc1511c4..0x1cc151e60;
 	// screensharingd 756.36.5.2, SendFrameBuffer 0x100021a5c..0x100021ae8, HandleSetEncodingsMessage 0x1000386b0).
-	err := c.writer.Write(append([][]byte{prelude}, c.firstMessages(c.prepare())...))
+	err = c.writer.Write(append([][]byte{prelude}, c.firstMessages(displayChanges)...))
 	if err != nil {
 		return err
 	}
@@ -320,22 +324,25 @@ func (c *Client) firstMessages(displayChanges [][]byte) [][]byte {
 	return append(messages, c.updateRequests(c.info.Width, c.info.Height)...)
 }
 
-func (c *Client) prepare() [][]byte {
+func (c *Client) prepare() ([][]byte, error) {
 	if c.options.Prepare == nil {
-		return nil
+		return nil, nil
 	}
 	c.access.Lock()
 	c.preparing = true
 	c.access.Unlock()
-	c.options.Prepare(c)
+	err := c.options.Prepare(c)
 	c.access.Lock()
 	c.preparing = false
 	held := c.heldDisplay
 	c.heldDisplay = nil
 	c.access.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return common.Map(held, func(change heldDisplayChange) []byte {
 		return change.message
-	})
+	}), nil
 }
 
 func (c *Client) startStandard() error {

@@ -144,6 +144,8 @@ type SessionOptions struct {
 
 	UpdateRate int32
 
+	AwaitVirtualDisplay bool
+
 	KeepAlive bool
 
 	DisableUDP bool

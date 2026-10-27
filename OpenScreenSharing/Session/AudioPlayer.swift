@@ -5,15 +5,18 @@ import QuartzCore
 
 nonisolated final class AudioPlayer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "io.nekohasekai.screensharing.audio")
-    private let engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
     private let inputFormat: AVAudioFormat
     private let outputFormat: AVAudioFormat
     private let converter: AVAudioConverter
     private let ring: AudioRing
+    private let output: AudioOutput
     private let packetFrames: Int
     private let sampleRate: Double
     private let fadeFrames: Int
     private var started = false
+    private var foreground = false
+    private var blocked = false
     private var previous: AVAudioPCMBuffer?
     private var undecoded = 0
     private var origin: CFTimeInterval?
@@ -74,27 +77,15 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
         fadeFrames = AudioOutput.fadeFrames(sampleRate: format.sampleRate)
         ring = AudioRing(channels: Int(format.channels), frames: Int(2 * format.sampleRate))
         ring.target.store(Int(Self.minimumTarget * format.sampleRate), ordering: .relaxed)
-        let output = AudioOutput(ring: ring, sampleRate: format.sampleRate)
-        let source = AVAudioSourceNode(format: outputFormat) { isSilence, _, frameCount, buffers in
-            if output.render(Int(frameCount), into: UnsafeMutableAudioBufferListPointer(buffers)) {
-                isSilence.pointee = true
-            }
-            return noErr
-        }
-        engine.attach(source)
-        engine.connect(source, to: engine.mainMixerNode, format: outputFormat)
-        let center = NotificationCenter.default
-        observers.append(
-            center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
-                self?.restart()
-            })
+        output = AudioOutput(ring: ring, sampleRate: format.sampleRate)
         #if os(iOS)
         observers.append(
-            center.addObserver(forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: nil) {
-                [weak self] notification in
+            NotificationCenter.default.addObserver(
+                forName: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance(), queue: nil
+            ) { [weak self] notification in
                 switch (notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init) {
-                case .began: self?.stopped()
-                case .ended: self?.restart()
+                case .began: self?.interrupt()
+                case .ended: self?.resume()
                 default: break
                 }
             })
@@ -105,30 +96,25 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
-        engine.stopForRelease()
-    }
-
-    func start() {
-        queue.async { [self] in play() }
+        engine?.stopForRelease()
     }
 
     func stop() {
-        queue.async { [self] in halt() }
+        queue.async { [self] in
+            foreground = false
+            halt()
+        }
     }
 
     var isPlaying: Bool {
-        queue.sync { started && engine.isRunning }
+        queue.sync { started && engine?.isRunning == true }
     }
 
     func setInBackground(_ background: Bool) {
         queue.async { [self] in
-            if background {
-                guard started else { return }
-                stopWhenQuiet()
-            } else {
-                quietTimer?.cancel()
-                quietTimer = nil
-                play()
+            foreground = !background
+            if !background {
+                blocked = false
             }
         }
     }
@@ -139,10 +125,29 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
             #if os(iOS)
             try RemoteAudioSession.activate()
             #endif
+            let engine = self.engine ?? AVAudioEngine()
+            if self.engine == nil {
+                let output = output
+                let source = AVAudioSourceNode(format: outputFormat) { isSilence, _, frameCount, buffers in
+                    if output.render(Int(frameCount), into: UnsafeMutableAudioBufferListPointer(buffers)) {
+                        isSilence.pointee = true
+                    }
+                    return noErr
+                }
+                engine.attach(source)
+                engine.connect(source, to: engine.mainMixerNode, format: outputFormat)
+                observers.append(
+                    NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) {
+                        [weak self] _ in
+                        self?.restart()
+                    })
+                self.engine = engine
+            }
             try engine.start()
             started = true
+            stopWhenQuiet()
         } catch {
-            started = false
+            blocked = true
             failed(error)
             stopped()
         }
@@ -153,26 +158,32 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
             guard started else { return }
             // AVAudioEngineConfigurationChange can arrive while the engine still reports running, although its documentation
             // says the engine stops itself first (iOS 26.4.2, https://developer.apple.com/forums/thread/825253).
-            engine.stop()
+            engine?.stop()
             started = false
             ring.flushRequested.store(true, ordering: .relaxed)
             play()
         }
     }
 
+    private func interrupt() {
+        queue.async { [self] in
+            blocked = true
+            guard started else { return }
+            ring.flushRequested.store(true, ordering: .relaxed)
+            halt()
+        }
+    }
+
+    private func resume() {
+        queue.async { [self] in blocked = false }
+    }
+
     private func halt() {
         quietTimer?.cancel()
         quietTimer = nil
         guard started else { return }
-        engine.stop()
+        engine?.stop()
         started = false
-        ring.flushRequested.store(true, ordering: .relaxed)
-        previous = nil
-        undecoded = 0
-        origin = nil
-        target = Self.minimumTarget
-        ring.target.store(Int(target * sampleRate), ordering: .relaxed)
-        converter.reset()
         stopped()
     }
 
@@ -194,7 +205,6 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
     func enqueue(_ unit: AudioAccessUnit) {
         let arrival = CACurrentMediaTime()
         queue.async { [self] in
-            guard started else { return }
             measure(arrival, timestamp: unit.timestamp, lost: unit.lost)
             let lost = unit.lost + undecoded
             guard let pcm = decode(unit.data) else {
@@ -202,13 +212,17 @@ nonisolated final class AudioPlayer: @unchecked Sendable {
                 return
             }
             undecoded = 0
+            defer { previous = pcm }
             if isAudible(pcm) {
                 lastSound = arrival
+                if foreground, !blocked {
+                    play()
+                }
             }
+            guard started else { return }
             if lost > 0 {
                 conceal(lost, before: pcm)
             }
-            previous = pcm
             write(pcm, frames: Int(pcm.frameLength))
         }
     }

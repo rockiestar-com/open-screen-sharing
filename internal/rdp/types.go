@@ -1,6 +1,7 @@
 package rdp
 
 import (
+	"context"
 	"image"
 	"log/slog"
 	"time"
@@ -16,23 +17,21 @@ const (
 )
 
 type Options struct {
-	Address            string
-	Username           string
-	Password           string
-	Domain             string
-	ClientName         string
-	Width              int
-	Height             int
-	DesktopScaleFactor int
-	KeyboardLayout     uint32
-	Clipboard          bool
-	Audio              bool
-	Microphone         bool
-	VerifyCertificate  func(fingerprint string) error
-	KeepAlive          bool
-	DisableUDP         bool
-	GraphicsCache      string
-	Logger             *slog.Logger
+	Address           string
+	Username          string
+	Password          string
+	Domain            string
+	ClientName        string
+	Display           func(ctx context.Context) (width, height, scale int, err error)
+	KeyboardLayout    uint32
+	Clipboard         bool
+	Audio             bool
+	Microphone        bool
+	VerifyCertificate func(fingerprint string, authenticated bool) error
+	KeepAlive         bool
+	DisableUDP        bool
+	GraphicsCache     string
+	Logger            *slog.Logger
 }
 
 type AudioFormat struct {

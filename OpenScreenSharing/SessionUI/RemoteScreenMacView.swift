@@ -579,10 +579,10 @@ final class RemoteScreenNSView: NSView, RemoteScreen {
         return imageRect.contains(systemPointerLocation)
     }
 
-    func drawnCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) -> CursorShape? {
+    func drawnCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) -> (shape: CursorShape, shownBySystem: Bool)? {
         updateRemoteCursor(shape, visible: visible, scale: scale)
         drawsCursorLocally = showsRemoteCursorLocally
-        return drawsCursorLocally ? nil : remoteCursor?.drawn
+        return remoteCursor.map { ($0.drawn, drawsCursorLocally) }
     }
 
     private func updateRemoteCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) {

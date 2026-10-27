@@ -40,9 +40,9 @@ func rdpOptions(o *SessionOptions, seen func(fingerprint string)) (rdp.Options, 
 		KeepAlive:      o.KeepAlive,
 		DisableUDP:     o.DisableUDP,
 		GraphicsCache:  graphicsCache,
-		VerifyCertificate: func(fingerprint string) error {
+		VerifyCertificate: func(fingerprint string, authenticated bool) error {
 			seen(fingerprint)
-			if trusted != "" && !strings.EqualFold(fingerprint, trusted) {
+			if !authenticated && trusted != "" && !strings.EqualFold(fingerprint, trusted) {
 				return E.Extend(rdp.ErrCertificateChanged, "fingerprint ", fingerprint, " is not the trusted ", trusted)
 			}
 			return nil

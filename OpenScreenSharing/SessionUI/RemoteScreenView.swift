@@ -7,6 +7,7 @@ struct RemoteScreenView: UIViewRepresentable {
     let matchesWindow: Bool
     let turnsLandscape: Bool
     let preferredOrientation: UIInterfaceOrientationMask?
+    let fillsScreen: Bool
     let mode: SessionMode
 
     init(controller: SessionController) {
@@ -14,6 +15,7 @@ struct RemoteScreenView: UIViewRepresentable {
         matchesWindow = controller.wantsVirtualDisplay
         turnsLandscape = controller.platform != .iOS
         preferredOrientation = controller.preferredOrientation
+        fillsScreen = AppSettings.shared.pictureFillsScreen
         mode = controller.mode
     }
 
@@ -25,6 +27,7 @@ struct RemoteScreenView: UIViewRepresentable {
         view.windowTracker.setMatchesWindow(matchesWindow)
         view.windowTracker.setTurnsLandscape(turnsLandscape)
         view.windowTracker.setPreferredOrientation(preferredOrientation)
+        view.windowTracker.setFillsScreen(fillsScreen)
         view.accessibilityValue = String(localized: mode == .control ? "Controlling" : "Observing")
     }
 }
@@ -38,6 +41,7 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
     private var presenter: ScreenPresenter!
     private let keyInput = KeyInputProxy()
     let pressIndicator = PressIndicatorView()
+    private let loupe = PointerLoupeView()
     private let systemInput = KeyInputProxy(systemInput: true)
     private var systemInputReturnsToKeyboard = false
     private var dictationPress: UIPress?
@@ -77,6 +81,7 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
             keyboardTracker.bottomAnchor.constraint(equalTo: keyboardLayoutGuide.topAnchor),
         ])
         addSubview(pressIndicator)
+        addSubview(loupe)
         isAccessibilityElement = true
         accessibilityLabel = String(localized: "Screen of \(controller.title)")
         accessibilityTraits = .allowsDirectInteraction
@@ -144,13 +149,32 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
         controller.sceneInBackground
     }
 
-    func drawnCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) -> CursorShape? {
-        guard !input.showsCursorAsPointer(shape, visible: visible, scale: scale), !controller.hidesPointerForTouch else { return nil }
-        return input.localPointer(for: shape, scale: scale) ?? shape
+    func drawnCursor(_ shape: CursorShape?, visible: Bool, scale: CGFloat) -> (shape: CursorShape, shownBySystem: Bool)? {
+        let shownBySystem = input.showsCursorAsPointer(shape, visible: visible, scale: scale)
+        guard !controller.hidesPointerForTouch, let cursor = input.localPointer(for: shape, scale: scale) ?? shape else { return nil }
+        return (cursor, shownBySystem)
     }
 
     func cursorDidRender(in rect: CGRect?) {
         pressIndicator.center = rect.map { CGPoint(x: $0.midX, y: $0.midY) } ?? viewPoint(for: controller.pointerPosition)
+    }
+
+    func loupe(for icon: CGRect?) -> LoupeSpot? {
+        guard windowTracker.fillsScreen, let icon, bounds.intersects(icon),
+            let spot = windowTracker.obstructions.loupe(for: icon, in: bounds)
+        else {
+            loupe.isHidden = true
+            return nil
+        }
+        let scale = contentScaleFactor
+        func pixelAligned(_ rect: CGRect) -> CGRect {
+            CGRect(
+                x: (rect.minX * scale).rounded() / scale, y: (rect.minY * scale).rounded() / scale,
+                width: (rect.width * scale).rounded() / scale, height: (rect.height * scale).rounded() / scale)
+        }
+        let aligned = LoupeSpot(source: pixelAligned(spot.source), frame: pixelAligned(spot.frame))
+        loupe.show(content: aligned.frame)
+        return aligned
     }
 
     func backgroundStateDidChange() {
@@ -163,6 +187,9 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
 
     func setNeedsRender() {
         updateLetterbox()
+        controller.debugInfoInset =
+            windowTracker.fillsScreen
+            ? windowTracker.obstructions.topCornerInset(left: effectiveUserInterfaceLayoutDirection == .rightToLeft, in: bounds) : nil
         presenter.setNeedsRender()
     }
 

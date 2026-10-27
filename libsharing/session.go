@@ -75,6 +75,8 @@ type Session struct {
 	finished      bool
 	setup         sessionSetup
 
+	displayRequested chan struct{}
+
 	resizeWidth  int
 	resizeHeight int
 
@@ -97,7 +99,7 @@ func NewSession(options *SessionOptions, handler SessionHandler) (*Session, erro
 	if options.UpdateRate < 0 {
 		return nil, E.New("invalid update rate ", options.UpdateRate, "; it must not be negative")
 	}
-	return &Session{options: *options, handler: handler, prompts: make(map[int64]chan int32)}, nil
+	return &Session{options: *options, handler: handler, prompts: make(map[int64]chan int32), displayRequested: make(chan struct{})}, nil
 }
 
 type remote interface {
@@ -192,29 +194,45 @@ func (s *Session) Connect() error {
 		if err != nil {
 			return err
 		}
-		dial = func(ctx context.Context) (remote, error) {
-			setup := s.takeSetup()
-			if display := setup.display; display != nil {
-				options.Width, options.Height, options.DesktopScaleFactor = rdpLayout(int(display.width), int(display.height), display.density)
-				setup.display = nil
+		options.Display = func(ctx context.Context) (int, int, int, error) {
+			err := s.waitForDisplay(ctx)
+			if err != nil {
+				return 0, 0, 0, err
 			}
+			s.access.Lock()
+			display := s.setup.display
+			s.setup.display = nil
+			s.access.Unlock()
+			if display == nil {
+				return 0, 0, 0, nil
+			}
+			width, height, scale := rdpLayout(int(display.width), int(display.height), display.density)
+			return width, height, scale, nil
+		}
+		dial = func(ctx context.Context) (remote, error) {
 			client, err := rdp.Dial(ctx, options, &rdpSessionEvents{session: s})
 			if err != nil {
 				return nil, err
 			}
-			connected := &rdpRemote{Client: client, logger: options.Logger}
-			connected.apply(setup)
-			return connected, nil
+			return &rdpRemote{Client: client, logger: options.Logger}, nil
 		}
 	default:
 		options, err := rfbOptions(&s.options, s.handler.OnServerCertificate)
 		if err != nil {
 			return err
 		}
-		options.Prepare = func(client *rfb.Client) {
-			rfbRemote{Client: client, session: s}.apply(s.takeSetup())
-		}
 		dial = func(ctx context.Context) (remote, error) {
+			options.Prepare = func(client *rfb.Client) error {
+				connected := rfbRemote{Client: client, session: s}
+				if connected.serverInfo().SupportsVirtualDisplay {
+					err := s.waitForDisplay(ctx)
+					if err != nil {
+						return err
+					}
+				}
+				connected.apply(s.takeSetup())
+				return nil
+			}
 			client, err := rfb.Dial(ctx, options, &sessionEvents{session: s})
 			if err != nil {
 				return nil, err
@@ -347,6 +365,18 @@ func (s *Session) pending(keep func(*sessionSetup)) (remote, bool) {
 		return nil, true
 	}
 	return s.remote, false
+}
+
+func (s *Session) waitForDisplay(ctx context.Context) error {
+	if !s.options.AwaitVirtualDisplay {
+		return nil
+	}
+	select {
+	case <-s.displayRequested:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Session) takeSetup() sessionSetup {
@@ -669,6 +699,11 @@ func (s *Session) SetVirtualDisplay(width int32, height int32, density float64, 
 	}
 	client, kept := s.pending(func(setup *sessionSetup) {
 		setup.display = &virtualDisplay{width: width, height: height, density: density, maximumWidth: maximumWidth, maximumHeight: maximumHeight}
+		select {
+		case <-s.displayRequested:
+		default:
+			close(s.displayRequested)
+		}
 	})
 	if kept {
 		return nil

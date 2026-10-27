@@ -117,10 +117,6 @@ func normalizeOptions(opts Options) (Options, error) {
 		}
 		opts.Address = net.JoinHostPort(opts.Address, defaultPort)
 	}
-	if opts.Width == 0 || opts.Height == 0 {
-		opts.Width, opts.Height = defaultWidth, defaultHeight
-	}
-	opts.Width, opts.Height, opts.DesktopScaleFactor = normalizeLayout(opts.Width, opts.Height, opts.DesktopScaleFactor)
 	if opts.ClientName == "" {
 		opts.ClientName = "OpenScreen"
 	}
@@ -166,6 +162,15 @@ func Dial(ctx context.Context, opts Options, events Events) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	width, height, scale, err := opts.Display(ctx)
+	if err != nil {
+		_ = t.conn.Close()
+		return nil, err
+	}
+	if width == 0 || height == 0 {
+		width, height = defaultWidth, defaultHeight
+	}
+	width, height, scale = normalizeLayout(width, height, scale)
 	lifetime, cancelLifetime := context.WithCancelCause(context.Background())
 	t.startReceiver(lifetime)
 	c := &Client{
@@ -185,9 +190,9 @@ func Dial(ctx context.Context, opts Options, events Events) (*Client, error) {
 		b = binary.LittleEndian.AppendUint16(b, 0)
 		return c.mcs.send(c.mcs.message, append(b, response...))
 	}}
-	c.graphics = newGraphics(events, c.logger, opts.Width, opts.Height, c)
+	c.graphics = newGraphics(events, c.logger, width, height, c)
 	c.clipboard = &clipboardChannel{events: events, changed: c.refreshInfo, shared: opts.Clipboard}
-	c.display = &displayChannel{logger: c.logger, changed: c.refreshInfo, width: opts.Width, height: opts.Height, scale: opts.DesktopScaleFactor, sentScale: opts.DesktopScaleFactor}
+	c.display = &displayChannel{logger: c.logger, changed: c.refreshInfo, width: width, height: height, scale: scale, sentScale: scale}
 	c.touch = &touchChannel{logger: c.logger, changed: c.refreshInfo}
 	c.audio = &audioChannel{events: events, changed: c.refreshInfo}
 	c.dynamicAudio = &audioChannel{events: events, changed: c.refreshInfo}
@@ -235,7 +240,7 @@ func Dial(ctx context.Context, opts Options, events Events) (*Client, error) {
 	}()
 	go c.input.run()
 	stop := context.AfterFunc(ctx, func() { _ = t.tcp.Close() })
-	err = c.connect(opts)
+	err = c.connect(opts, width, height, scale)
 	stop()
 	if err == nil {
 		err = ctx.Err()
@@ -256,8 +261,8 @@ func Dial(ctx context.Context, opts Options, events Events) (*Client, error) {
 	return c, nil
 }
 
-func (c *Client) connect(opts Options) error {
-	err := c.mcs.connect(opts, c.channels.channels)
+func (c *Client) connect(opts Options, width, height, scale int) error {
+	err := c.mcs.connect(opts, width, height, scale, c.channels.channels)
 	if err != nil {
 		return err
 	}

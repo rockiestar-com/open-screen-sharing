@@ -1,5 +1,8 @@
 import Foundation
 import Perception
+#if os(iOS)
+import UIKit
+#endif
 
 @Perceptible
 final class AppSettings {
@@ -8,6 +11,8 @@ final class AppSettings {
     private enum Key {
         static let showsDebugInfo = "showsDebugInfo"
         static let cursorStyle = "cursorStyle"
+        static let pinchZooms = "pinchZooms"
+        static let pictureFillsScreen = "pictureFillsScreen"
         static let computerLayout = "computerLayout"
         static let computerOrder = "computerOrder"
         static let seenTutorials = "seenTutorials"
@@ -20,6 +25,28 @@ final class AppSettings {
     var cursorStyle: CursorStyle {
         didSet { store.set(cursorStyle, for: Key.cursorStyle) }
     }
+
+    #if os(iOS)
+    var pinchZooms: Bool {
+        didSet { store.set(pinchZooms, for: Key.pinchZooms) }
+    }
+
+    var pictureFillsScreen: Bool {
+        didSet { store.set(pictureFillsScreen, for: Key.pictureFillsScreen) }
+    }
+
+    static var offersFullScreen: Bool {
+        switch UIDevice.current.userInterfaceIdiom {
+        case .phone:
+            return true
+        case .pad:
+            guard #available(iOS 26, *) else { return DisplayShape.describesDevice }
+            return true
+        default:
+            return false
+        }
+    }
+    #endif
 
     var computerLayout: ComputerLayout {
         didSet { store.set(computerLayout, for: Key.computerLayout) }
@@ -38,6 +65,10 @@ final class AppSettings {
     init() {
         showsDebugInfo = store.value(Bool.self, for: Key.showsDebugInfo) ?? false
         cursorStyle = store.value(CursorStyle.self, for: Key.cursorStyle) ?? .system
+        #if os(iOS)
+        pinchZooms = store.value(Bool.self, for: Key.pinchZooms) ?? (UIDevice.current.userInterfaceIdiom == .phone)
+        pictureFillsScreen = store.value(Bool.self, for: Key.pictureFillsScreen) ?? true
+        #endif
         computerLayout = store.value(ComputerLayout.self, for: Key.computerLayout) ?? .grid
         computerOrder = store.value([UUID].self, for: Key.computerOrder) ?? []
         seenTutorials = store.value(Set<SessionTutorial>.self, for: Key.seenTutorials) ?? []

@@ -230,6 +230,7 @@ nonisolated struct SessionConfiguration: Sendable {
     var receivesAudio: Bool
     var sendsAudio: Bool
     var updateRate: Int
+    var awaitsVirtualDisplay: Bool
     var networkConfiguration = NetworkConfiguration()
     var keepsAlive = false
     var disablesUDP = false

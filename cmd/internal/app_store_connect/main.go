@@ -26,14 +26,14 @@ const (
 
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: app_store_connect next_marketing_version | next_project_version <marketing version> | publish_testflight <marketing version> <project version> [release notes]")
+		log.Fatal("usage: app_store_connect next_marketing_version [released version...] | next_project_version <marketing version> | publish_testflight <marketing version> <project version> [release notes]")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	var err error
 	switch os.Args[1] {
 	case "next_marketing_version":
-		err = printNextMarketingVersion(ctx)
+		err = printNextMarketingVersion(ctx, os.Args[2:])
 	case "next_project_version":
 		if len(os.Args) < 3 {
 			log.Fatal("usage: app_store_connect next_project_version <marketing version>")
@@ -64,7 +64,7 @@ func createClient(expireDuration time.Duration) *asc.Client {
 	return asc.NewClient(tokenConfig.Client())
 }
 
-func printNextMarketingVersion(ctx context.Context) error {
+func printNextMarketingVersion(ctx context.Context, releasedVersions []string) error {
 	versions, _, err := createClient(time.Minute).Apps.ListAppStoreVersionsForApp(ctx, appID, &asc.ListAppStoreVersionsQuery{
 		FilterPlatform: []string{string(asc.PlatformIOS)},
 		Limit:          200,
@@ -72,38 +72,36 @@ func printNextMarketingVersion(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	approvedStates := []asc.AppStoreVersionState{
-		asc.AppStoreVersionStatePendingDeveloperRelease,
-		asc.AppStoreVersionStateProcessingForAppStore,
-		asc.AppStoreVersionStatePendingAppleRelease,
-		asc.AppStoreVersionStatePreorderReadyForSale,
+	releasedStates := []asc.AppStoreVersionState{
 		asc.AppStoreVersionStateReadyForSale,
 		asc.AppStoreVersionStateReplacedWithNewVersion,
 		asc.AppStoreVersionStateDeveloperRemovedFromSale,
 		asc.AppStoreVersionStateRemovedFromSale,
 	}
-	var approvedVersion []int
 	for _, version := range versions.Data {
-		if version.Attributes.AppStoreState == nil || !slices.Contains(approvedStates, *version.Attributes.AppStoreState) {
-			continue
+		if version.Attributes.AppStoreState != nil && slices.Contains(releasedStates, *version.Attributes.AppStoreState) {
+			releasedVersions = append(releasedVersions, *version.Attributes.VersionString)
 		}
+	}
+	var latestVersion []int
+	for _, version := range releasedVersions {
 		var parts []int
-		for _, part := range strings.Split(*version.Attributes.VersionString, ".") {
+		for _, part := range strings.Split(version, ".") {
 			number, err := strconv.Atoi(part)
 			if err != nil {
-				return E.Cause(err, "parse version ", *version.Attributes.VersionString)
+				return E.Cause(err, "parse version ", version)
 			}
 			parts = append(parts, number)
 		}
-		if slices.Compare(parts, approvedVersion) > 0 {
-			approvedVersion = parts
+		if slices.Compare(parts, latestVersion) > 0 {
+			latestVersion = parts
 		}
 	}
-	if approvedVersion == nil {
-		return E.New("no approved version")
+	if latestVersion == nil {
+		return E.New("no released version")
 	}
-	approvedVersion[len(approvedVersion)-1]++
-	os.Stdout.WriteString(F.ToString(strings.Join(common.Map(approvedVersion, strconv.Itoa), "."), "\n"))
+	latestVersion[len(latestVersion)-1]++
+	os.Stdout.WriteString(F.ToString(strings.Join(common.Map(latestVersion, strconv.Itoa), "."), "\n"))
 	return nil
 }
 
