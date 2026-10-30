@@ -24,6 +24,7 @@ struct RemoteScreenView: NSViewRepresentable {
     func updateNSView(_ view: RemoteScreenNSView, context: Context) {
         view.setAccessibilityValue(mode == .control ? String(localized: "Controlling") : String(localized: "Observing"))
         view.refreshCursor()
+        view.updateSymbolicHotKeys()
     }
 }
 
@@ -47,6 +48,7 @@ final class RemoteScreenNSView: NSView, RemoteScreen {
     private var reportedArea: CGSize?
     private var reportedScale: CGFloat?
     private var keyMonitor: Any?
+    private var suspendsSymbolicHotKeys = false
     private var composedText = ""
     private var composedMarkedRange: NSRange?
     private var typedText = ""
@@ -117,6 +119,9 @@ final class RemoteScreenNSView: NSView, RemoteScreen {
                 CGAssociateMouseAndMouseCursorPosition(1)
                 NSCursor.unhide()
             }
+            if suspendsSymbolicHotKeys {
+                SymbolicHotKeys.resume()
+            }
         }
     }
 
@@ -158,6 +163,7 @@ final class RemoteScreenNSView: NSView, RemoteScreen {
         reportedScale = nil
         guard let window else {
             controller.releaseAllKeys()
+            updateSymbolicHotKeys()
             return
         }
         if !hasSizedWindow, !window.isVisible {
@@ -324,6 +330,7 @@ final class RemoteScreenNSView: NSView, RemoteScreen {
         controller.sceneDidBecomeActive()
         controller.syncCapsLock(NSEvent.modifierFlags.contains(.capsLock))
         updatePointerLock()
+        updateSymbolicHotKeys()
     }
 
     @objc private func windowDidResignKey() {
@@ -340,7 +347,19 @@ final class RemoteScreenNSView: NSView, RemoteScreen {
         endScroll(velocity: .zero, cancelled: true)
         systemPointerLocation = nil
         controller.pointerLeftScreen()
+        updateSymbolicHotKeys()
         setNeedsRender()
+    }
+
+    func updateSymbolicHotKeys() {
+        let suspends = window?.isKeyWindow == true && controller.isControlling
+        guard suspends != suspendsSymbolicHotKeys else { return }
+        suspendsSymbolicHotKeys = suspends
+        if suspends {
+            SymbolicHotKeys.suspend()
+        } else {
+            SymbolicHotKeys.resume()
+        }
     }
 
     @objc private func keyboardSourceDidChange() {

@@ -54,7 +54,9 @@ struct ShortcutRecorder<Target: Hashable>: ViewModifier {
         if let monitor, !monitoring {
             NSEvent.removeMonitor(monitor)
             self.monitor = nil
+            SymbolicHotKeys.resume()
         } else if monitor == nil, monitoring {
+            SymbolicHotKeys.suspend()
             var held: NSEvent.ModifierFlags = []
             var spoiled = false
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
