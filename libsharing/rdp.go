@@ -133,6 +133,10 @@ func (r *rdpRemote) setVisible(visible bool) error {
 	return r.SuppressOutput(!visible)
 }
 
+func (r *rdpRemote) setKeepsAwake(bool) error {
+	return nil
+}
+
 func (r *rdpRemote) SetVirtualDisplay(width, height int, density float64, _, _ int) error {
 	return r.SetDisplay(rdpLayout(width, height, density))
 }
@@ -156,33 +160,6 @@ func (r *rdpRemote) PasteClipboard(clipboard *Clipboard) error {
 		return E.New("RDP pastes only text, and the clipboard has none")
 	}
 	return r.Paste(text)
-}
-
-const (
-	TouchPhaseBegan     = int32(rdp.TouchBegan)
-	TouchPhaseMoved     = int32(rdp.TouchMoved)
-	TouchPhaseEnded     = int32(rdp.TouchEnded)
-	TouchPhaseCancelled = int32(rdp.TouchCancelled)
-)
-
-type TouchFrame struct {
-	touches []rdp.Touch
-}
-
-func (f *TouchFrame) Add(id int64, phase int32, x int32, y int32) {
-	f.touches = append(f.touches, rdp.Touch{ID: id, Phase: rdp.TouchPhase(phase), X: int(x), Y: int(y)})
-}
-
-func (s *Session) SendTouches(frame *TouchFrame) error {
-	connected, err := s.connectedRemote()
-	if err != nil {
-		return err
-	}
-	client, isRDP := connected.(*rdpRemote)
-	if !isRDP {
-		return E.New("touch input is available only over RDP")
-	}
-	return client.SendTouches(frame.touches)
 }
 
 func (s *Session) SendMicrophoneAudio(data []byte) error {

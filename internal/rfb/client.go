@@ -126,9 +126,12 @@ type Client struct {
 	hdr              bool
 	mediaStarted     bool
 	gestures         gestureState
+	touch            touchState
 	keyboard         keyboardState
+	keepsAwake       bool
 
 	lastUpdate     atomic.Int64
+	lastInput      atomic.Int64
 	pixelsReceived atomic.Bool
 	inputReady     bool
 	heldInput      [][]byte
@@ -416,6 +419,7 @@ func (c *Client) watch(done <-chan struct{}) {
 		quiet := mediaStream && (pixels || video)
 		pushing := c.pushing && !c.downloading
 		c.access.Unlock()
+		c.keepAwake()
 		if quiet {
 			continue
 		}

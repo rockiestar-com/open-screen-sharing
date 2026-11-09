@@ -32,11 +32,14 @@ nonisolated struct LoginCheck: Sendable {
 }
 
 nonisolated enum ServerProber {
-    static func probe(host: String, port: Int?, remoteProtocol: RemoteProtocol?) async -> Result<ProbedServer, SessionFailure> {
+    static func probe(
+        host: String, port: Int?, remoteProtocol: RemoteProtocol?, checksOwnScreen: Bool = false
+    ) async -> Result<ProbedServer, SessionFailure> {
         let request = UncheckedSendable(value: LibsharingNewProbeRequest()!)
         return await withTaskCancellationHandler {
             await Task.detached(priority: .userInitiated) { () -> Result<ProbedServer, SessionFailure> in
                 LibsharingLog.installed
+                request.value.checkOwnScreen = checksOwnScreen
                 let probe: LibsharingServerProbe =
                     switch remoteProtocol {
                     case .vnc: request.value.probeServer(host, port: Int32(port ?? RemoteProtocol.vnc.defaultPort))!
@@ -65,7 +68,9 @@ nonisolated enum ServerProber {
         }
     }
 
-    static func checkLogin(_ server: ProbedServer, credentials: SessionCredentials) async -> Result<LoginCheck, SessionFailure> {
+    static func checkLogin(
+        _ server: ProbedServer, credentials: SessionCredentials, allowsUnverifiedLogin: Bool = false
+    ) async -> Result<LoginCheck, SessionFailure> {
         let request = UncheckedSendable(value: LibsharingNewProbeRequest()!)
         return await withTaskCancellationHandler {
             await Task.detached(priority: .userInitiated) { () -> Result<LoginCheck, SessionFailure> in
@@ -75,6 +80,7 @@ nonisolated enum ServerProber {
                 options.host = server.address.host
                 options.port = Int32(server.address.port)
                 options.trustedFingerprint = server.fingerprint
+                options.allowUnverifiedLogin = allowsUnverifiedLogin
                 credentials.apply(to: options, observes: false)
                 let check = request.value.checkLogin(options)!
                 guard check.errorCode == LibsharingErrorNone else {
