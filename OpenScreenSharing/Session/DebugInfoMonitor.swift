@@ -11,9 +11,9 @@ final class DebugInfoMonitor {
         var bitsPerSecond: Double?
         var encoding: String?
         /// One-way network estimate (half RTT plus video queuing delay), used by the latency breakdown.
-        var networkMilliseconds: Double
+        var networkMilliseconds: Double?
         /// Full round trip plus video queuing delay, used by the input response breakdown.
-        var roundTripMilliseconds: Double
+        var roundTripMilliseconds: Double?
         var remoteMilliseconds: Double?
         var deviceMilliseconds: Double?
         var lossy: Bool
@@ -242,8 +242,8 @@ final class DebugInfoMonitor {
             shownPerSecond: measured ? Double(shown) / elapsed : nil,
             bitsPerSecond: bitsPerSecond,
             encoding: statistics.encoding,
-            networkMilliseconds: statistics.roundTripMilliseconds / 2 + queuing,
-            roundTripMilliseconds: statistics.roundTripMilliseconds + queuing,
+            networkMilliseconds: statistics.roundTripMilliseconds.map { $0 / 2 + queuing },
+            roundTripMilliseconds: statistics.roundTripMilliseconds.map { $0 + queuing },
             remoteMilliseconds: remoteMilliseconds,
             deviceMilliseconds: deviceMilliseconds,
             lossy: statistics.packets != nil,

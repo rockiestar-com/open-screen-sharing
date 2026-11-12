@@ -6,6 +6,7 @@ import (
 
 type Statistics struct {
 	RoundTripMilliseconds float64
+	RoundTripKnown        bool
 
 	ReceivedBytes int64
 
@@ -39,6 +40,7 @@ func (r rfbRemote) statistics(statistics *Statistics) {
 	info, known := r.ConnectionInfo()
 	if known {
 		statistics.RoundTripMilliseconds = float64(info.RoundTrip.Microseconds()) / 1000
+		statistics.RoundTripKnown = true
 		statistics.ReceivedBytes = int64(info.ReceivedBytes)
 	}
 	stream := r.MediaStream()
