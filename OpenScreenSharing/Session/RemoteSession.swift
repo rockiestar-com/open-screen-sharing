@@ -50,6 +50,10 @@ nonisolated struct SessionFailure: Error, Equatable, Sendable {
     }
 }
 
+nonisolated extension SessionFailure.Kind {
+    var isUnreachable: Bool { self == .unreachable || self == .hostNotFound }
+}
+
 nonisolated struct SessionChoicePrompt: Equatable, Sendable {
     var id: Int64
     var consoleUser: String

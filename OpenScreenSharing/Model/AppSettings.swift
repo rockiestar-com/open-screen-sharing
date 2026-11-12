@@ -13,6 +13,7 @@ final class AppSettings {
         static let cursorStyle = "cursorStyle"
         static let pinchZooms = "pinchZooms"
         static let pictureFillsScreen = "pictureFillsScreen"
+        static let rotatesWithDevice = "rotatesWithDevice"
         static let computerLayout = "computerLayout"
         static let computerOrder = "computerOrder"
         static let seenTutorials = "seenTutorials"
@@ -33,6 +34,10 @@ final class AppSettings {
 
     var pictureFillsScreen: Bool {
         didSet { store.set(pictureFillsScreen, for: Key.pictureFillsScreen) }
+    }
+
+    var rotatesWithDevice: Bool {
+        didSet { store.set(rotatesWithDevice, for: Key.rotatesWithDevice) }
     }
 
     static var offersFullScreen: Bool {
@@ -68,6 +73,7 @@ final class AppSettings {
         #if os(iOS)
         pinchZooms = store.value(Bool.self, for: Key.pinchZooms) ?? (UIDevice.current.userInterfaceIdiom == .phone)
         pictureFillsScreen = store.value(Bool.self, for: Key.pictureFillsScreen) ?? true
+        rotatesWithDevice = store.value(Bool.self, for: Key.rotatesWithDevice) ?? true
         #endif
         computerLayout = store.value(ComputerLayout.self, for: Key.computerLayout) ?? .grid
         computerOrder = store.value([UUID].self, for: Key.computerOrder) ?? []

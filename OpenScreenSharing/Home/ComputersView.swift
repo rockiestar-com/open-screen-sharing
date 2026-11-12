@@ -1,3 +1,4 @@
+import Network
 import Perception
 import SwiftUI
 
@@ -8,6 +9,7 @@ struct ComputersView: View {
     let newConnection: () -> Void
 
     @Environment(AvailabilityMonitor.self) private var availabilityMonitor
+    @Environment(NearbyBrowser.self) private var nearby
     private let store = ComputerStore.shared
     private let settings = AppSettings.shared
     @State private var computerToDelete: Computer?
@@ -75,6 +77,28 @@ struct ComputersView: View {
                 ) { servers in
                     availabilityMonitor.update(servers: servers)
                 }
+                .onChangeCompat(of: nearby.computers, initial: true) { found in
+                    adoptBonjourAddresses(found)
+                }
+        }
+    }
+
+    /// Saved connections switch to the Bonjour host name once Bonjour finds them and keep the LAN IPv4 as a fallback.
+    private func adoptBonjourAddresses(_ found: [NearbyComputer]) {
+        guard !found.isEmpty else { return }
+        for computer in store.computers {
+            guard let match = nearby.computer(matching: computer.address, remoteProtocol: computer.remoteProtocol),
+                let hostName = match.hostName
+            else { continue }
+            let isIPLiteral = IPv4Address(computer.host) != nil || IPv6Address(computer.host) != nil
+            let host = isIPLiteral ? hostName : computer.host
+            let lanAddress = match.lanAddress ?? (IPv4Address(computer.host) != nil ? computer.host : computer.lanAddress)
+            guard host != computer.host || lanAddress != computer.lanAddress else { continue }
+            do {
+                try store.setNetworkAddress(host: host, lanAddress: lanAddress, for: computer.id)
+            } catch {
+                alert = AlertState(String(localized: "Couldn’t Save “\(computer.displayName)”"), error: error)
+            }
         }
     }
 

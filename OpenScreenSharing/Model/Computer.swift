@@ -23,6 +23,8 @@ nonisolated struct Computer: Codable, Identifiable, Hashable, FetchableRecord, P
     var trustedFingerprint = ""
     var keepsAlive = false
     var disablesUDP = false
+    var lanAddress = ""
+    var prefersLANAddress = false
 
     var quality = SessionQuality.adaptive
     var observes = false
@@ -81,6 +83,11 @@ nonisolated struct Computer: Codable, Identifiable, Hashable, FetchableRecord, P
             host = newValue.host
             port = newValue.port
         }
+    }
+
+    /// The LAN address dialed instead of `host` when the user forces it or when `host` can't be found or reached.
+    var lanFallback: ComputerAddress? {
+        lanAddress.isEmpty || ComputerAddress(host: lanAddress, port: port).matches(address) ? nil : ComputerAddress(host: lanAddress, port: port)
     }
 
     var addressDescription: String {

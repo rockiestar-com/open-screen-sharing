@@ -262,6 +262,9 @@ final class SessionController: Identifiable {
     @PerceptionIgnored private var microphoneFormat: AudioFormat?
     @PerceptionIgnored private var microphone: MicrophoneSender?
     @PerceptionIgnored private var reconnectAttempts = 0
+    @PerceptionIgnored private var lanFallback: ComputerAddress?
+    @PerceptionIgnored private var prefersLANAddress = false
+    @PerceptionIgnored private var dialsLANAddress = false
     @PerceptionIgnored private var reconnectTask: Task<Void, Never>?
     @PerceptionIgnored private var chosenDisplay: DisplaySelection?
     @PerceptionIgnored private var restoresDisplay = false
@@ -341,6 +344,10 @@ final class SessionController: Identifiable {
         guard session == nil, probeTask == nil else { return }
         if case .failed(let failure) = phase, failure.kind == .drawingFailed { return }
         let stored = computerID.flatMap { store.stored($0) }
+        let saved = computerID.flatMap { store.computer($0) }
+        lanFallback = saved?.lanFallback
+        prefersLANAddress = saved?.prefersLANAddress ?? false
+        dialsLANAddress = false
         if let stored {
             restore(stored.memory)
             device = device ?? stored.device
@@ -374,11 +381,15 @@ final class SessionController: Identifiable {
             presentCredentialPrompt(for: server, username: username, failure: failure)
             return
         }
-        probeTask = Task { [weak self, route] in
-            let result = await ServerProber.probe(host: route.host, port: route.port, remoteProtocol: route.remoteProtocol)
+        probeTask = Task { [weak self, route, address = dialAddress] in
+            let result = await ServerProber.probe(host: address.host, port: address.port, remoteProtocol: route.remoteProtocol)
             guard let self, !Task.isCancelled else { return }
             probeTask = nil
             guard phase == .connecting else { return }
+            if case .failure(let probeFailure) = result, probeFailure.kind.isUnreachable, switchToLANAddress() {
+                askForCredentials(username: username, failure: failure)
+                return
+            }
             switch result {
             case .success(let server):
                 self.server = server.authentication
@@ -532,7 +543,7 @@ final class SessionController: Identifiable {
         pipeline.setExpectsVideo(usesHighPerformance)
         pipeline.setSchedulesPresentation(networkConfiguration.schedulesPresentation)
         let configuration = SessionConfiguration(
-            address: route.address,
+            address: dialAddress,
             remoteProtocol: route.remoteProtocol,
             platform: route.knownPlatform,
             trustedFingerprint: trustedFingerprint,
@@ -759,7 +770,7 @@ final class SessionController: Identifiable {
         case .reconnecting:
             return reconnectAttempts > 0
         case .failed(let failure):
-            return failure.kind == .connectionLost || failure.kind == .unreachable || failure.kind == .hostNotFound
+            return failure.kind == .connectionLost || failure.kind.isUnreachable
         default:
             return false
         }
@@ -784,13 +795,30 @@ final class SessionController: Identifiable {
 
     private static let reconnectLimit = 6
 
+    private var dialAddress: ComputerAddress {
+        guard let lanFallback, prefersLANAddress || dialsLANAddress else { return route.address }
+        return lanFallback
+    }
+
+    /// Bonjour names can stop resolving or route through another interface, such as when Tailscale is on.
+    private func switchToLANAddress() -> Bool {
+        guard lanFallback != nil, !prefersLANAddress, !dialsLANAddress else { return false }
+        dialsLANAddress = true
+        return true
+    }
+
     fileprivate func handle(phase newPhase: SessionPhase) {
         var newPhase = newPhase
         var reconnecting = false
         if case .reconnecting = phase { reconnecting = true }
         if reconnecting, newPhase == .connecting || newPhase == .authenticating { return }
         if case .failed(let failure) = newPhase {
-            let unreachable = failure.kind == .unreachable || failure.kind == .hostNotFound
+            let unreachable = failure.kind.isUnreachable
+            if unreachable, switchToLANAddress(), !reconnecting, let credentials {
+                teardown()
+                connect(with: credentials)
+                return
+            }
             let retryable = failure.kind == .connectionLost || (reconnecting && unreachable)
             if retryable, hasConnected, reconnectAttempts < Self.reconnectLimit, let credentials {
                 reconnectAttempts += 1

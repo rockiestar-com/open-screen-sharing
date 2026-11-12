@@ -112,6 +112,15 @@ private struct PictureSettingsView: View {
                         "Extends the picture to the edges of the screen, where parts of it may be hidden by the rounded corners or the camera. When the pointer moves into a hidden part, that part is also shown nearby."
                     )
                 }
+                if UIDevice.current.userInterfaceIdiom == .phone {
+                    Section {
+                        Toggle(isOn: Binding(get: { settings.rotatesWithDevice }, set: { settings.rotatesWithDevice = $0 })) {
+                            Label("Rotate with Device", systemImage: "rotate.right")
+                        }
+                    } footer: {
+                        Text("Lets the session turn to portrait or landscape with the device, fitting the picture to the screen width in portrait.")
+                    }
+                }
             }
             .navigationTitle("Picture")
         }

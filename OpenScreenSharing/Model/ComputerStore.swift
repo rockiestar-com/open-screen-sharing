@@ -167,6 +167,13 @@ final class ComputerStore {
         try update(id) { $0.trustedFingerprint = fingerprint }
     }
 
+    func setNetworkAddress(host: String, lanAddress: String, for id: UUID) throws {
+        try update(id) { computer in
+            computer.host = host
+            computer.lanAddress = lanAddress
+        }
+    }
+
     func setThumbnail(_ thumbnail: Data, for id: UUID) throws {
         try update(id) { $0.thumbnail = thumbnail }
     }

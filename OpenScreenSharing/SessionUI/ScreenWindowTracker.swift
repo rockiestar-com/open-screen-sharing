@@ -16,6 +16,8 @@ final class ScreenWindowTracker {
     private var replacedMinimumSize: CGSize?
     private var turnsLandscape = true
     private var preferredOrientation: UIInterfaceOrientationMask?
+    private var rotatesWithDevice = false
+    private var landscapeArea: CGSize?
     private var restoredOrientation: UIInterfaceOrientationMask?
     private var awaitsRotation = false
 
@@ -113,6 +115,12 @@ final class ScreenWindowTracker {
         geometryDidChange()
     }
 
+    func setRotatesWithDevice(_ rotates: Bool) {
+        guard rotates != rotatesWithDevice else { return }
+        rotatesWithDevice = rotates
+        geometryDidChange()
+    }
+
     func setFillsScreen(_ fills: Bool) {
         guard fills != fillsScreen else { return }
         fillsScreen = fills
@@ -152,12 +160,33 @@ final class ScreenWindowTracker {
     }
 
     private func reportArea() {
-        guard let scene, !scene.isInteractivelyResizingCompat, let area = screenArea?.size else { return }
+        guard let scene, !scene.isInteractivelyResizingCompat, var area = screenArea?.size else { return }
+        if keepsLandscapeResolution {
+            if area.width >= area.height {
+                landscapeArea = area
+            } else {
+                area = landscapeArea ?? estimatedLandscapeArea(for: area)
+            }
+        }
         let scale = view.traitCollection.displayScale
         guard area != reportedArea || scale != reportedScale else { return }
         reportedArea = area
         reportedScale = scale
         report(area, scale, scene.screen.bounds.size)
+    }
+
+    // A phone turned to portrait keeps the computer's landscape resolution, as Screens does, and shows it fitted to the
+    // width instead of asking for a narrow portrait display.
+    private var keepsLandscapeResolution: Bool {
+        view.traitCollection.userInterfaceIdiom == .phone && rotatesWithDevice && turnsLandscape
+    }
+
+    // Before the session has been in landscape, assumes the landscape safe area insets both sides by the portrait top.
+    private func estimatedLandscapeArea(for portrait: CGSize) -> CGSize {
+        guard let window = view.window else { return CGSize(width: portrait.height, height: portrait.width) }
+        let size = window.bounds.size
+        let inset = fillsScreen ? 0 : window.safeAreaInsets.top
+        return CGSize(width: max(size.width, size.height) - 2 * inset, height: min(size.width, size.height))
     }
 
     private func applySizeRestriction() {
@@ -183,7 +212,7 @@ final class ScreenWindowTracker {
     private func updateOrientation(_ scene: UIWindowScene) {
         let orientation: UIInterfaceOrientationMask?
         if view.traitCollection.userInterfaceIdiom == .phone {
-            orientation = preferredOrientation
+            orientation = rotatesWithDevice ? nil : preferredOrientation
         } else if turnsLandscape {
             orientation = windowCoversScreen ? .landscape : nil
         } else {

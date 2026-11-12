@@ -17,6 +17,20 @@ struct NearbyComputer: Identifiable, Hashable {
         guard let hostName, let port else { return nil }
         return ComputerAddress(host: hostName, port: port)
     }
+
+    /// The IPv4 address Bonjour resolved on the local network, preferring private ranges and skipping
+    /// link-local and Tailscale's 100.64.0.0/10.
+    var lanAddress: String? {
+        let candidates = addresses.compactMap { IPv4Address($0) }.filter { address in
+            let bytes = [UInt8](address.rawValue)
+            return !(bytes[0] == 169 && bytes[1] == 254) && !(bytes[0] == 100 && (64...127).contains(bytes[1]))
+        }
+        func isPrivate(_ address: IPv4Address) -> Bool {
+            let bytes = [UInt8](address.rawValue)
+            return bytes[0] == 10 || (bytes[0] == 172 && (16...31).contains(bytes[1])) || (bytes[0] == 192 && bytes[1] == 168)
+        }
+        return (candidates.filter(isPrivate).min { "\($0)" < "\($1)" } ?? candidates.min { "\($0)" < "\($1)" }).map { "\($0)" }
+    }
 }
 
 @Perceptible

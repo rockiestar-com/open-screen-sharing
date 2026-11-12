@@ -20,6 +20,8 @@ struct ComputerEditor: View {
     @State private var networkConfiguration: NetworkConfiguration
     @State private var keepsAlive: Bool
     @State private var disablesUDP: Bool
+    @State private var lanAddress: String
+    @State private var prefersLANAddress: Bool
     @State private var problem: Problem?
     @State private var alert: AlertState?
     @FocusState private var focusedField: Field?
@@ -27,6 +29,7 @@ struct ComputerEditor: View {
     enum Field {
         case name
         case address
+        case lanAddress
         case username
         case password
     }
@@ -34,6 +37,7 @@ struct ComputerEditor: View {
     enum Problem {
         case emptyName
         case invalidAddress
+        case invalidLANAddress
     }
 
     init(computer: Computer, setup: Setup? = nil) {
@@ -48,10 +52,16 @@ struct ComputerEditor: View {
         _networkConfiguration = State(initialValue: computer.networkConfiguration)
         _keepsAlive = State(initialValue: computer.keepsAlive)
         _disablesUDP = State(initialValue: computer.disablesUDP)
+        _lanAddress = State(initialValue: computer.lanAddress)
+        _prefersLANAddress = State(initialValue: computer.prefersLANAddress)
     }
 
     private var trimmedUsername: String {
         username.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedLANAddress: String {
+        lanAddress.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var isComplete: Bool {
@@ -125,7 +135,30 @@ struct ComputerEditor: View {
                     switch problem {
                     case .emptyName: Text("Enter a name.").foregroundStyle(.red)
                     case .invalidAddress: Text("Enter a valid server address.").foregroundStyle(.red)
-                    case nil: EmptyView()
+                    case .invalidLANAddress, nil: EmptyView()
+                    }
+                }
+                Section {
+                    LabeledContentCompat("LAN Address") {
+                        TextField("LAN Address", text: $lanAddress, prompt: Text("Optional"))
+                            .multilineTextAlignment(.trailing)
+                            #if os(iOS)
+                            .keyboardType(.numbersAndPunctuation)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                            .autocorrectionDisabled()
+                            .focused($focusedField, equals: .lanAddress)
+                            .onChangeCompat(of: lanAddress) { if problem == .invalidLANAddress { problem = nil } }
+                    }
+                    Toggle("Always Use LAN Address", isOn: $prefersLANAddress)
+                        .disabled(trimmedLANAddress.isEmpty)
+                } header: {
+                    Text("Local Network")
+                } footer: {
+                    if problem == .invalidLANAddress {
+                        Text("Enter a valid LAN address.").foregroundStyle(.red)
+                    } else {
+                        Text("Used when the server address can’t be found or reached, such as when Tailscale is on.")
                     }
                 }
                 if setup == nil {
@@ -202,6 +235,12 @@ struct ComputerEditor: View {
             return
         }
         let address = ComputerAddress(host: endpoint.host, port: endpoint.port ?? choice.remoteProtocol.defaultPort)
+        let lanHost = trimmedLANAddress.isEmpty ? "" : ComputerAddress.host(parsing: trimmedLANAddress)
+        guard let lanHost else {
+            problem = .invalidLANAddress
+            focusedField = .lanAddress
+            return
+        }
         guard isComplete else {
             focusedField = .username
             return
@@ -222,6 +261,8 @@ struct ComputerEditor: View {
                 computer.usesHighPerformance = choice.usesHighPerformance
                 computer.keepsAlive = keepsAlive
                 computer.disablesUDP = disablesUDP
+                computer.lanAddress = lanHost
+                computer.prefersLANAddress = prefersLANAddress && !lanHost.isEmpty
             }
         } catch {
             alert = AlertState(String(localized: "Couldn’t Save “\(name)”"), error: error)

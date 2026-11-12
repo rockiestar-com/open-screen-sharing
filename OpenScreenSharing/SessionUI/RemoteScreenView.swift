@@ -8,6 +8,7 @@ struct RemoteScreenView: UIViewRepresentable {
     let turnsLandscape: Bool
     let preferredOrientation: UIInterfaceOrientationMask?
     let fillsScreen: Bool
+    let rotatesWithDevice: Bool
     let mode: SessionMode
 
     init(controller: SessionController) {
@@ -16,6 +17,7 @@ struct RemoteScreenView: UIViewRepresentable {
         turnsLandscape = controller.platform != .iOS
         preferredOrientation = controller.preferredOrientation
         fillsScreen = AppSettings.shared.pictureFillsScreen
+        rotatesWithDevice = AppSettings.shared.rotatesWithDevice
         mode = controller.mode
     }
 
@@ -28,6 +30,7 @@ struct RemoteScreenView: UIViewRepresentable {
         view.windowTracker.setTurnsLandscape(turnsLandscape)
         view.windowTracker.setPreferredOrientation(preferredOrientation)
         view.windowTracker.setFillsScreen(fillsScreen)
+        view.windowTracker.setRotatesWithDevice(rotatesWithDevice)
         view.accessibilityValue = String(localized: mode == .control ? "Controlling" : "Observing")
     }
 }
@@ -50,6 +53,7 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
 
     private(set) var zoom: CGFloat = 1
     private var viewportCenter: CGPoint?
+    private var laidOutFitScale: CGFloat?
     private var keyboardLift: CGFloat = 0
     private var keyboardTop: CGFloat?
 
@@ -128,6 +132,7 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
         if controller.scaleMode == .actualSize {
             applyScale(.actualSize)
         }
+        keepZoomedSize()
         clampCenter()
         let top = coveredKeyboardTop
         if top != keyboardTop {
@@ -221,7 +226,21 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
         )
     }
 
+    // A custom zoom keeps the picture's size when the fitted size changes, as on rotation in Screens, and turns into fit
+    // where that size would be smaller than fitting.
+    private func keepZoomedSize() {
+        let fit = fitScale
+        defer { laidOutFitScale = fit }
+        guard let previous = laidOutFitScale, abs(previous - fit) > 0.0001, controller.scaleMode == .custom else { return }
+        zoom = min(max(zoom * previous / fit, 1), maximumZoom)
+        if zoom == 1 {
+            viewportCenter = nil
+        }
+        updateScaleMode()
+    }
+
     func imageSizeDidChange() {
+        laidOutFitScale = fitScale
         if controller.scaleMode == .actualSize {
             applyScale(.actualSize)
         } else if controller.scaleMode == .fit {
@@ -371,9 +390,20 @@ final class RemoteScreenUIView: UIView, RemoteScreen {
     func toggleZoom(at viewPoint: CGPoint) {
         if controller.scaleMode != .fit {
             applyScale(.fit)
+        } else if let fillZoom = portraitFillZoom {
+            setZoom(fillZoom, keeping: imagePoint(for: viewPoint), at: viewPoint)
         } else {
             setZoom(max(actualSizeZoom, 2), keeping: imagePoint(for: viewPoint), at: viewPoint)
         }
+    }
+
+    // A landscape picture fitted to the width of a portrait screen zooms to fill its height, as in Screens.
+    private var portraitFillZoom: CGFloat? {
+        let area = fitArea
+        guard traitCollection.userInterfaceIdiom == .phone, area.height > area.width, imageSize.width > imageSize.height
+        else { return nil }
+        let zoom = area.height / imageSize.height / max(fitScale, 0.0001)
+        return zoom > 1.01 ? zoom : nil
     }
 
     func setZoom(_ newZoom: CGFloat, keeping imageAnchor: CGPoint, at viewAnchor: CGPoint) {

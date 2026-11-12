@@ -548,12 +548,12 @@ final class KeyShortcuts {
                 KeyMapping(
                     id: UUID(uuidString: "6F1C2D3E-0A51-4C0B-9E77-3B1D7A0C5E01")!,
                     trigger: KeyShortcut(key: "q", modifiers: .control),
-                    steps: [.key(KeyShortcut(key: "q", modifiers: .command))]
+                    steps: [.key(KeyCombo(keys: ["q"], modifiers: .command))]
                 ),
                 KeyMapping(
                     id: UUID(uuidString: "6F1C2D3E-0A51-4C0B-9E77-3B1D7A0C5E02")!,
                     trigger: KeyShortcut(key: "h", modifiers: .control),
-                    steps: [.key(KeyShortcut(key: "h", modifiers: .command))]
+                    steps: [.key(KeyCombo(keys: ["h"], modifiers: .command))]
                 ),
             ]
         case .pc:

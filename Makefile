@@ -11,12 +11,20 @@ build_ios:
 	xcodebuild build -skipMacroValidation -scheme OpenScreenSharing -configuration Debug -destination 'generic/platform=iOS' | xcbeautify | grep -A 10 -e "Build Succeeded" -e "BUILD FAILED" -e "❌"
 
 DEV_DEVICE ?= 00008103-001E15990C0B001E
+DEV_APP_NAME ?= OSS Dev
+DEV_APP_ICON ?= DevIcon
 
 install_dev_ios:
 	xcodebuild build -skipMacroValidation -allowProvisioningUpdates -scheme OpenScreenSharing -configuration Debug -destination 'id=$(DEV_DEVICE)' -derivedDataPath build/dd \
 		DEVELOPMENT_TEAM=DH5UQL44AR PRODUCT_BUNDLE_IDENTIFIER=com.rockiestar.screensharing CODE_SIGN_STYLE=Automatic \
-		ASSETCATALOG_COMPILER_APPICON_NAME=DevIcon INFOPLIST_KEY_CFBundleDisplayName="OSS Dev" EXCLUDED_SOURCE_FILE_NAMES=InfoPlist.xcstrings | xcbeautify | grep -A 10 -e "Build Succeeded" -e "BUILD FAILED" -e "❌"
+		ASSETCATALOG_COMPILER_APPICON_NAME=$(DEV_APP_ICON) INFOPLIST_KEY_CFBundleDisplayName="$(DEV_APP_NAME)" EXCLUDED_SOURCE_FILE_NAMES=InfoPlist.xcstrings | xcbeautify | grep -A 10 -e "Build Succeeded" -e "BUILD FAILED" -e "❌"
 	xcrun devicectl device install app --device $(DEV_DEVICE) "build/dd/Build/Products/Debug-iphoneos/Screen Sharing.app"
+
+install_promax_ios:
+	$(MAKE) install_dev_ios DEV_DEVICE=00008150-001E03861A80401C DEV_APP_NAME=RockieScreen DEV_APP_ICON=RockieIcon
+
+install_duo_ios:
+	$(MAKE) install_dev_ios DEV_DEVICE=00008160-00046DD21480000A DEV_APP_NAME=RockieScreen DEV_APP_ICON=RockieIcon
 
 release_ios: lib archive_ios upload_ios
 

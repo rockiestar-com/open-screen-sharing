@@ -103,6 +103,13 @@ enum AppDatabase {
                     arguments: [JSONSerialization.data(withJSONObject: mappings), name])
             }
         }
+        // Named 1.0.3 because devices already applied it under that identifier.
+        migrator.registerMigration("1.0.3") { db in
+            try db.alter(table: "computers") { t in
+                t.add(column: "lanAddress", .text).notNull().defaults(to: "")
+                t.add(column: "prefersLANAddress", .boolean).notNull().defaults(to: false)
+            }
+        }
         return migrator
     }()
 
